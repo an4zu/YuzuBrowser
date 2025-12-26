@@ -15,60 +15,28 @@
  */
 
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
-apply plugin: 'com.github.ben-manes.versions'
 
 buildscript {
     repositories {
         mavenCentral()
-        jcenter()
         google()
+        maven { url "https://jitpack.io" }
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:4.1.2'
+        classpath 'com.android.tools.build:gradle:4.2.2'
         classpath Dependencies.kotlin_plugin
         classpath Dagger.hiltPlugin
-        classpath 'com.github.ben-manes:gradle-versions-plugin:0.36.0'
         classpath 'com.android.tools.build.jetifier:jetifier-processor:1.0.0-beta10'
         classpath 'com.google.gms:google-services:4.3.5'
         classpath 'com.google.firebase:firebase-crashlytics-gradle:2.5.0'
-
-        // NOTE: Do not place your application dependencies here; they belong
-        // in the individual module build.gradle files
-    }
-}
-
-configurations {
-    dependencyUpdates.resolutionStrategy {
-        componentSelection { rules ->
-            rules.all { ComponentSelection selection ->
-                boolean rejected = ['alpha', 'beta', 'rc', 'cr', 'm', 'preview'].any { qualifier ->
-                    selection.candidate.version ==~ /(?i).*[.-]${qualifier}[.\d-]*/
-                }
-                if (rejected) {
-                    selection.reject('Release candidate')
-                }
-            }
-        }
-    }
-}
-
-static def isNonStable(v) {
-    ["-alpha", "-beta", "-rc", "-m"].any { v.toLowerCase().contains(it) }
-}
-
-tasks.named("dependencyUpdates").configure {
-
-    // Example 2: disallow release candidates as upgradable versions from stable versions
-    rejectVersionIf {
-        isNonStable(it.candidate.version) && !isNonStable(it.currentVersion)
     }
 }
 
 allprojects {
     repositories {
         mavenCentral()
-        jcenter()
         google()
+        maven { url "https://jitpack.io" }
     }
 }
 

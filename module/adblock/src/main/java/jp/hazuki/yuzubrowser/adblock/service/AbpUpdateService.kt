@@ -16,6 +16,9 @@
 
 package jp.hazuki.yuzubrowser.adblock.service
 
+
+import jp.hazuki.yuzubrowser.adblock.kvs.AdBlockPref
+
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
@@ -33,7 +36,6 @@ import jp.hazuki.yuzubrowser.adblock.filter.unified.element.ElementFilter
 import jp.hazuki.yuzubrowser.adblock.filter.unified.getFilterDir
 import jp.hazuki.yuzubrowser.adblock.filter.unified.io.ElementWriter
 import jp.hazuki.yuzubrowser.adblock.filter.unified.io.FilterWriter
-import jp.hazuki.yuzubrowser.adblock.repository.AdBlockPref
 import jp.hazuki.yuzubrowser.adblock.repository.abp.AbpDatabase
 import jp.hazuki.yuzubrowser.adblock.repository.abp.AbpEntity
 import jp.hazuki.yuzubrowser.core.eventbus.LocalEventBus
@@ -88,11 +90,14 @@ class AbpUpdateService : JobIntentService() {
             }
         }
 
-        AdBlockPref.get(applicationContext).abpNextUpdateTime = if (nextUpdateTime != Long.MAX_VALUE) {
-            nextUpdateTime
-        } else {
-            System.currentTimeMillis() + A_DAY
-        }
+       val pref = AdBlockPref(applicationContext)
+val next = if (nextUpdateTime != Long.MAX_VALUE) {
+    nextUpdateTime
+} else {
+    System.currentTimeMillis() + A_DAY
+}
+pref.setNextUpdateTime(next)
+
         if (result) {
             LocalEventBus.getDefault().notify(BROADCAST_ACTION_UPDATE_AD_BLOCK_DATA)
         }
@@ -265,25 +270,26 @@ class AbpUpdateService : JobIntentService() {
 
         private const val JOB_ID = 10
 
-        fun updateAll(context: Context, forceUpdate: Boolean = false, result: UpdateResult? = null) {
-            if (!forceUpdate) {
-                val prefs = AdBlockPref.get(context.applicationContext)
-                if (prefs.abpNextUpdateTime < System.currentTimeMillis()) return
+   fun updateAll(context: Context, forceUpdate: Boolean = false, result: UpdateResult? = null) {
+    if (!forceUpdate) {
+        val pref = AdBlockPref(context.applicationContext)
+        if (pref.getNextUpdateTime() < System.currentTimeMillis()) return
 
-                if (AppPrefs.abpUpdateWifiOnly.get()) {
-                    val cm = context.getSystemService<ConnectivityManager>()!!
-                    if (!cm.isConnectedWifi()) return
-                }
-            }
-
-            val intent = Intent(context, AbpUpdateService::class.java).apply {
-                action = ACTION_UPDATE_ALL
-                putExtra(EXTRA_FORCE_UPDATE, forceUpdate)
-                putExtra(EXTRA_RESULT, result)
-            }
-
-            enqueueWork(context, AbpUpdateService::class.java, JOB_ID, intent)
+        if (AppPrefs.abpUpdateWifiOnly.get()) {
+            val cm = context.getSystemService<ConnectivityManager>()!!
+            if (!cm.isConnectedWifi()) return
         }
+    }
+
+    val intent = Intent(context, AbpUpdateService::class.java).apply {
+        action = ACTION_UPDATE_ALL
+        putExtra(EXTRA_FORCE_UPDATE, forceUpdate)
+        putExtra(EXTRA_RESULT, result)
+    }
+
+    enqueueWork(context, AbpUpdateService::class.java, JOB_ID, intent)
+}
+
 
         fun update(context: Context, abpEntity: AbpEntity, result: UpdateResult? = null) {
             val intent = Intent(context, AbpUpdateService::class.java).apply {

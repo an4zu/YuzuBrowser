@@ -87,3 +87,14 @@ dependencies {
     implementation AndroidX.roomKtx
     kapt AndroidX.roomCompiler
 }
+
+
+kapt {
+    correctErrorTypes = true
+    useBuildCache = false
+    includeCompileClasspath = false
+    javacOptions {
+        option("-source", "1.8")
+        option("-target", "1.8")
+    }
+}

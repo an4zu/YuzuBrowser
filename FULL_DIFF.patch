@@ -1,0 +1,3080 @@
+diff --git a/app/build.gradle b/app/build.gradle
+index 6a28ed68..f94171a4 100644
+--- a/app/build.gradle
++++ b/app/build.gradle
+@@ -17,6 +17,7 @@
+ apply plugin: 'com.android.application'
+ apply plugin: 'kotlin-android'
+ apply plugin: 'kotlin-kapt'
++apply plugin: 'dagger.hilt.android.plugin'
+ apply plugin: 'com.cookpad.android.plugin.license-tools'
+ apply plugin: 'com.google.gms.google-services'
+ apply plugin: 'com.google.firebase.crashlytics'
+@@ -147,12 +148,8 @@ dependencies {
+ 
+     implementation Libs.kotlin_stdlib
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
++    implementation Dagger.hilt
++    kapt Dagger.hiltCompiler
+ 
+     // Import the BoM for the Firebase platform
+     implementation platform('com.google.firebase:firebase-bom:26.5.0')
+diff --git a/app/src/main/java/jp/hazuki/yuzubrowser/YuzuBrowserApplication.kt b/app/src/main/java/jp/hazuki/yuzubrowser/YuzuBrowserApplication.kt
+index 2e19a304..79db4c2d 100644
+--- a/app/src/main/java/jp/hazuki/yuzubrowser/YuzuBrowserApplication.kt
++++ b/app/src/main/java/jp/hazuki/yuzubrowser/YuzuBrowserApplication.kt
+@@ -22,14 +22,11 @@ import android.content.ContextWrapper
+ import android.webkit.WebView
+ import androidx.appcompat.app.AppCompatDelegate
+ import com.squareup.moshi.Moshi
+-import dagger.android.AndroidInjector
+-import dagger.android.DispatchingAndroidInjector
+-import dagger.android.HasAndroidInjector
++import dagger.hilt.android.HiltAndroidApp
+ import jp.hazuki.yuzubrowser.adblock.registerAdBlockNotification
+ import jp.hazuki.yuzubrowser.adblock.repository.abp.AbpDatabase
+ import jp.hazuki.yuzubrowser.core.utility.log.Logger
+ import jp.hazuki.yuzubrowser.core.utility.utils.createLanguageConfig
+-import jp.hazuki.yuzubrowser.di.DaggerAppComponent
+ import jp.hazuki.yuzubrowser.download.registerDownloadNotification
+ import jp.hazuki.yuzubrowser.legacy.settings.data.AppData
+ import jp.hazuki.yuzubrowser.provider.ProviderManager
+@@ -37,8 +34,8 @@ import jp.hazuki.yuzubrowser.ui.BrowserApplication
+ import jp.hazuki.yuzubrowser.ui.settings.AppPrefs
+ import javax.inject.Inject
+ 
+-
+-class YuzuBrowserApplication : Application(), BrowserApplication, HasAndroidInjector {
++@HiltAndroidApp
++class YuzuBrowserApplication : Application(), BrowserApplication {
+ 
+     override val applicationId = BuildConfig.APPLICATION_ID
+     override val permissionAppSignature = PERMISSION_MYAPP_SIGNATURE
+@@ -47,20 +44,14 @@ class YuzuBrowserApplication : Application(), BrowserApplication, HasAndroidInje
+     override val context: Context
+         get() = this
+ 
+-    @Inject
+-    lateinit var androidInjector: DispatchingAndroidInjector<Any>
+-
+     @Inject
+     override lateinit var moshi: Moshi
+ 
+     @Inject
+     lateinit var abpDatabase: AbpDatabase
+ 
+-    private var isNeedInject = true
+-
+     override fun onCreate() {
+         super.onCreate()
+-        injectIfNeed()
+         registerDownloadNotification()
+         registerAdBlockNotification()
+ 
+@@ -75,18 +66,6 @@ class YuzuBrowserApplication : Application(), BrowserApplication, HasAndroidInje
+         Logger.isDebug = BuildConfig.DEBUG
+     }
+ 
+-    override fun androidInjector(): AndroidInjector<Any> {
+-        injectIfNeed()
+-        return androidInjector
+-    }
+-
+-    private fun injectIfNeed() {
+-        if (isNeedInject) {
+-            isNeedInject = false
+-            DaggerAppComponent.factory().create(this).inject(this)
+-        }
+-    }
+-
+     override fun attachBaseContext(base: Context) {
+         val lang = AppPrefs.language.get()
+         val context = if (lang != "") {
+diff --git a/app/src/main/java/jp/hazuki/yuzubrowser/di/AppComponent.kt b/app/src/main/java/jp/hazuki/yuzubrowser/di/AppComponent.kt
+deleted file mode 100644
+index 59ed47c4..00000000
+--- a/app/src/main/java/jp/hazuki/yuzubrowser/di/AppComponent.kt
++++ /dev/null
+@@ -1,64 +0,0 @@
+-/*
+- * Copyright (C) 2017-2020 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.di
+-
+-import dagger.BindsInstance
+-import dagger.Component
+-import dagger.android.AndroidInjectionModule
+-import dagger.android.AndroidInjector
+-import jp.hazuki.yuzubrowser.YuzuBrowserApplication
+-import jp.hazuki.yuzubrowser.adblock.AdBlockModule
+-import jp.hazuki.yuzubrowser.adblock.AdBlockUiModule
+-import jp.hazuki.yuzubrowser.bookmark.BookmarkUiModule
+-import jp.hazuki.yuzubrowser.browser.di.ActivityModule
+-import jp.hazuki.yuzubrowser.download.DownloadAndroidModule
+-import jp.hazuki.yuzubrowser.download.DownloadModule
+-import jp.hazuki.yuzubrowser.history.di.HistoryModule
+-import jp.hazuki.yuzubrowser.legacy.di.LegacyUiModule
+-import jp.hazuki.yuzubrowser.legacy.settings.di.SettingsModule
+-import jp.hazuki.yuzubrowser.legacy.useragent.UserAgentModule
+-import jp.hazuki.yuzubrowser.legacy.webencode.WebEncodeModule
+-import jp.hazuki.yuzubrowser.search.di.SearchModule
+-import javax.inject.Singleton
+-
+-@Singleton
+-@Component(modules = [
+-    AndroidInjectionModule::class,
+-    AppModule::class,
+-    ActivityModule::class,
+-    ProviderModule::class,
+-    SearchModule::class,
+-    WebEncodeModule::class,
+-    UserAgentModule::class,
+-    DownloadModule::class,
+-    DownloadAndroidModule::class,
+-    AdBlockModule::class,
+-    AdBlockUiModule::class,
+-    BookmarkUiModule::class,
+-    HistoryModule::class,
+-    SettingsModule::class,
+-    LegacyUiModule::class
+-])
+-interface AppComponent : AndroidInjector<YuzuBrowserApplication> {
+-
+-    @Component.Factory
+-    interface Factory {
+-        fun create(@BindsInstance application: YuzuBrowserApplication): AppComponent
+-    }
+-
+-    override fun inject(application: YuzuBrowserApplication)
+-}
+diff --git a/app/src/main/java/jp/hazuki/yuzubrowser/di/AppModule.kt b/app/src/main/java/jp/hazuki/yuzubrowser/di/AppModule.kt
+index f5e2db54..05220eec 100644
+--- a/app/src/main/java/jp/hazuki/yuzubrowser/di/AppModule.kt
++++ b/app/src/main/java/jp/hazuki/yuzubrowser/di/AppModule.kt
+@@ -16,13 +16,14 @@
+ 
+ package jp.hazuki.yuzubrowser.di
+ 
+-import android.app.Application
+ import android.content.Context
+ import android.content.SharedPreferences
+ import com.squareup.moshi.Moshi
+ import dagger.Module
+ import dagger.Provides
+-import jp.hazuki.yuzubrowser.YuzuBrowserApplication
++import dagger.hilt.InstallIn
++import dagger.hilt.android.qualifiers.ApplicationContext
++import dagger.hilt.components.SingletonComponent
+ import jp.hazuki.yuzubrowser.favicon.FaviconManager
+ import jp.hazuki.yuzubrowser.legacy.webrtc.WebPermissionsDao
+ import jp.hazuki.yuzubrowser.legacy.webrtc.WebPermissionsDatabase
+@@ -34,22 +35,13 @@ import java.util.concurrent.TimeUnit
+ import javax.inject.Singleton
+ 
+ @Module
++@InstallIn(SingletonComponent::class)
+ object AppModule {
+     private const val PREFERENCE_NAME = "main_preference"
+ 
+     @Provides
+-    fun provideContext(app: YuzuBrowserApplication): Context {
+-        return app
+-    }
+-
+-    @Provides
+-    fun provideBrowserApplication(app: YuzuBrowserApplication): BrowserApplication {
+-        return app
+-    }
+-
+-    @Provides
+-    fun provideApplication(app: YuzuBrowserApplication): Application {
+-        return app
++    fun provideBrowserApplication(@ApplicationContext context: Context): BrowserApplication {
++        return context as BrowserApplication
+     }
+ 
+     @Provides
+@@ -71,7 +63,7 @@ object AppModule {
+ 
+     @Provides
+     @Singleton
+-    fun provideSharedPreferences(context: Context): SharedPreferences {
++    fun provideSharedPreferences(@ApplicationContext context: Context): SharedPreferences {
+         return context.getSharedPreferences(PREFERENCE_NAME, Context.MODE_PRIVATE)
+     }
+ 
+@@ -82,13 +74,13 @@ object AppModule {
+ 
+     @Provides
+     @Singleton
+-    fun provideFaviconManager(context: Context): FaviconManager {
++    fun provideFaviconManager(@ApplicationContext context: Context): FaviconManager {
+         return FaviconManager(context)
+     }
+ 
+     @Provides
+     @Singleton
+-    fun provideWebPermissionsDao(context: Context): WebPermissionsDao {
++    fun provideWebPermissionsDao(@ApplicationContext context: Context): WebPermissionsDao {
+         return WebPermissionsDatabase.newInstance(context).webPermissionsDao()
+     }
+ }
+diff --git a/app/src/main/java/jp/hazuki/yuzubrowser/di/ProviderModule.kt b/app/src/main/java/jp/hazuki/yuzubrowser/di/ProviderModule.kt
+deleted file mode 100644
+index dbe57f11..00000000
+--- a/app/src/main/java/jp/hazuki/yuzubrowser/di/ProviderModule.kt
++++ /dev/null
+@@ -1,32 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.di
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.provider.ReadItLaterProvider
+-import jp.hazuki.yuzubrowser.provider.SuggestProvider
+-
+-@Module
+-abstract class ProviderModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeSuggestProvider(): SuggestProvider
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeReadItLaterProvider(): ReadItLaterProvider
+-}
+\ No newline at end of file
+diff --git a/app/src/main/java/jp/hazuki/yuzubrowser/provider/ReadItLaterProvider.kt b/app/src/main/java/jp/hazuki/yuzubrowser/provider/ReadItLaterProvider.kt
+index ac82062b..f568f943 100644
+--- a/app/src/main/java/jp/hazuki/yuzubrowser/provider/ReadItLaterProvider.kt
++++ b/app/src/main/java/jp/hazuki/yuzubrowser/provider/ReadItLaterProvider.kt
+@@ -16,6 +16,7 @@
+ 
+ package jp.hazuki.yuzubrowser.provider
+ 
++import android.content.ContentProvider
+ import android.content.ContentValues
+ import android.content.Context
+ import android.content.UriMatcher
+@@ -26,20 +27,27 @@ import android.net.Uri
+ import android.os.ParcelFileDescriptor
+ import android.provider.OpenableColumns
+ import com.squareup.moshi.Moshi
+-import dagger.android.DaggerContentProvider
++import dagger.hilt.EntryPoint
++import dagger.hilt.InstallIn
++import dagger.hilt.android.EntryPointAccessors
++import dagger.hilt.components.SingletonComponent
+ import jp.hazuki.yuzubrowser.BuildConfig
+ import jp.hazuki.yuzubrowser.legacy.readitlater.ReadItLaterIndex
+ import jp.hazuki.yuzubrowser.legacy.readitlater.ReadItem
+ import jp.hazuki.yuzubrowser.ui.provider.IReadItLaterProvider
+ import java.io.File
+-import javax.inject.Inject
+ 
+-class ReadItLaterProvider : DaggerContentProvider() {
++class ReadItLaterProvider : ContentProvider() {
+ 
+     private lateinit var directory: File
+-    private lateinit var index: ReadItLaterIndex
+-    @Inject
+-    lateinit var moshi: Moshi
++
++    private val index: ReadItLaterIndex by lazy {
++        val entryPoint = EntryPointAccessors.fromApplication(
++            context!!,
++            ReadItLaterProviderEntryPoint::class.java
++        )
++        ReadItLaterIndex(entryPoint.moshi(), directory)
++    }
+ 
+     companion object {
+         const val TIME = IReadItLaterProvider.TIME
+@@ -89,9 +97,7 @@ class ReadItLaterProvider : DaggerContentProvider() {
+     }
+ 
+     override fun onCreate(): Boolean {
+-        super.onCreate()
+         directory = context!!.getDir("readItLater", Context.MODE_PRIVATE)
+-        index = ReadItLaterIndex(moshi, directory)
+         return true
+     }
+ 
+@@ -256,4 +262,10 @@ class ReadItLaterProvider : DaggerContentProvider() {
+     }
+ 
+     private fun getUri(time: Long) = URI.buildUpon().appendPath("path").appendPath(time.toString()).build()
++
++    @EntryPoint
++    @InstallIn(SingletonComponent::class)
++    interface ReadItLaterProviderEntryPoint {
++        fun moshi(): Moshi
++    }
+ }
+diff --git a/app/src/main/java/jp/hazuki/yuzubrowser/provider/SuggestProvider.kt b/app/src/main/java/jp/hazuki/yuzubrowser/provider/SuggestProvider.kt
+index 8c4b12a8..5a7ebdc5 100644
+--- a/app/src/main/java/jp/hazuki/yuzubrowser/provider/SuggestProvider.kt
++++ b/app/src/main/java/jp/hazuki/yuzubrowser/provider/SuggestProvider.kt
+@@ -17,6 +17,7 @@
+ package jp.hazuki.yuzubrowser.provider
+ 
+ import android.app.SearchManager
++import android.content.ContentProvider
+ import android.content.ContentValues
+ import android.content.Context
+ import android.content.UriMatcher
+@@ -29,7 +30,10 @@ import android.provider.BaseColumns
+ import android.text.TextUtils
+ import com.squareup.moshi.JsonDataException
+ import com.squareup.moshi.JsonReader
+-import dagger.android.DaggerContentProvider
++import dagger.hilt.EntryPoint
++import dagger.hilt.InstallIn
++import dagger.hilt.android.EntryPointAccessors
++import dagger.hilt.components.SingletonComponent
+ import jp.hazuki.yuzubrowser.BuildConfig
+ import jp.hazuki.yuzubrowser.ErrorReportServer
+ import jp.hazuki.yuzubrowser.core.utility.log.Logger
+@@ -45,19 +49,21 @@ import java.io.IOException
+ import java.net.UnknownHostException
+ import java.util.*
+ import java.util.concurrent.TimeUnit
+-import javax.inject.Inject
+ 
+-class SuggestProvider : DaggerContentProvider() {
++class SuggestProvider : ContentProvider() {
+ 
+     private lateinit var mOpenHelper: DatabaseHelper
+     private lateinit var mSuggestEngine: ISuggest
+-    @Inject
+-    lateinit var okHttpClient: OkHttpClient
++    private val okHttpClient: OkHttpClient by lazy {
++        EntryPointAccessors.fromApplication(
++            context!!,
++            SuggestProviderEntryPoint::class.java
++        ).okHttpClient()
++    }
+ 
+     private var mSuggestType: Int = 0
+ 
+     override fun onCreate(): Boolean {
+-        super.onCreate()
+         val context = context ?: throw IllegalStateException()
+         mOpenHelper = DatabaseHelper(context)
+         mSuggestType = AppPrefs.search_suggest_engine.get()
+@@ -308,15 +314,15 @@ class SuggestProvider : DaggerContentProvider() {
+         throw UnsupportedOperationException()
+     }
+ 
+-    private class DatabaseHelper internal constructor(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
++    private class DatabaseHelper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
+ 
+         override fun onCreate(db: SQLiteDatabase) {
+             db.beginTransaction()
+             try {
+                 db.execSQL("CREATE TABLE " + TABLE_NAME + " (" +
+-                        BaseColumns._ID + " INTEGER PRIMARY KEY" +
+-                        ", " + SearchManager.SUGGEST_COLUMN_QUERY + " TEXT UNIQUE ON CONFLICT REPLACE" +
+-                        ")")
++                    BaseColumns._ID + " INTEGER PRIMARY KEY" +
++                    ", " + SearchManager.SUGGEST_COLUMN_QUERY + " TEXT UNIQUE ON CONFLICT REPLACE" +
++                    ")")
+                 db.setTransactionSuccessful()
+             } finally {
+                 db.endTransaction()
+@@ -329,6 +335,12 @@ class SuggestProvider : DaggerContentProvider() {
+         }
+     }
+ 
++    @EntryPoint
++    @InstallIn(SingletonComponent::class)
++    interface SuggestProviderEntryPoint {
++        fun okHttpClient(): OkHttpClient
++    }
++
+     companion object {
+         private const val TAG = "GoogleSuggestProvider"
+         private const val AUTHORITY = BuildConfig.APPLICATION_ID + ".search.SuggestProvider"
+diff --git a/browser/build.gradle b/browser/build.gradle
+index f80aad42..ba9c147c 100644
+--- a/browser/build.gradle
++++ b/browser/build.gradle
+@@ -17,6 +17,7 @@
+ apply plugin: 'com.android.library'
+ apply plugin: 'kotlin-android'
+ apply plugin: 'kotlin-kapt'
++apply plugin: 'dagger.hilt.android.plugin'
+ 
+ android {
+     compileSdkVersion Build.compile_sdk_version
+@@ -93,10 +94,6 @@ dependencies {
+     implementation Libs.kotlin_coroutines
+     implementation Libs.kotlin_coroutines_android
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
++    implementation Dagger.hilt
++    kapt Dagger.hiltCompiler
+ }
+diff --git a/browser/src/main/java/jp/hazuki/yuzubrowser/browser/BrowserActivity.kt b/browser/src/main/java/jp/hazuki/yuzubrowser/browser/BrowserActivity.kt
+index 50bd7c95..dd1918d1 100644
+--- a/browser/src/main/java/jp/hazuki/yuzubrowser/browser/BrowserActivity.kt
++++ b/browser/src/main/java/jp/hazuki/yuzubrowser/browser/BrowserActivity.kt
+@@ -41,6 +41,7 @@ import androidx.webkit.WebViewCompat
+ import androidx.webkit.WebViewFeature
+ import com.google.android.material.appbar.AppBarLayout
+ import com.squareup.moshi.Moshi
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.asyncpermissions.AsyncPermissions
+ import jp.hazuki.asyncpermissions.PermissionResult
+ import jp.hazuki.yuzubrowser.adblock.BROADCAST_ACTION_UPDATE_AD_BLOCK_DATA
+@@ -124,6 +125,7 @@ import java.util.*
+ import javax.inject.Inject
+ import kotlin.random.Random
+ 
++@AndroidEntryPoint
+ class BrowserActivity : BrowserBaseActivity(), BrowserController, FinishAlertDialog.OnFinishDialogCallBack, AddAdBlockDialog.OnAdBlockListUpdateListener, WebRtcRequest, SaveWebArchiveDialog.OnSaveWebViewListener, WebViewProvider {
+ 
+     private lateinit var asyncPermissions: AsyncPermissions
+@@ -1072,9 +1074,9 @@ class BrowserActivity : BrowserBaseActivity(), BrowserController, FinishAlertDia
+         val listView = ListView(this).also { it.adapter = adapter }
+ 
+         val dialog = AlertDialog.Builder(this)
+-                .setTitle(R.string.tab_history)
+-                .setView(listView)
+-                .create()
++            .setTitle(R.string.tab_history)
++            .setView(listView)
++            .create()
+ 
+         listView.setOnItemClickListener { _, _, position, _ ->
+             val next = position - historyList.current
+@@ -1187,9 +1189,9 @@ class BrowserActivity : BrowserBaseActivity(), BrowserController, FinishAlertDia
+         FinishAlertDialog(this)
+             .setPositiveButton(android.R.string.ok)
+             .setNegativeButton(android.R.string.cancel)
+-                .setNeutralButton(R.string.minimize)
+-                .setClearTabNo(clearTabNo)
+-                .show(supportFragmentManager)
++            .setNeutralButton(R.string.minimize)
++            .setClearTabNo(clearTabNo)
++            .show(supportFragmentManager)
+     }
+ 
+     override fun onFinishPositiveButtonClicked(clearTabNo: Int, newSetting: Int) {
+@@ -1627,12 +1629,12 @@ class BrowserActivity : BrowserBaseActivity(), BrowserController, FinishAlertDia
+ 
+     override fun requestPagePermission(host: String, resources: Array<String>, onGrant: (Boolean) -> Unit) {
+         AlertDialog.Builder(this)
+-                .setTitle(R.string.permission_request)
+-                .setMessage(getRequestRtcList(host, resources))
+-                .setPositiveButton(R.string.allow) { _, _ -> onGrant(true) }
+-                .setNegativeButton(R.string.block) { _, _ -> onGrant(false) }
+-                .setOnCancelListener { onGrant(false) }
+-                .show()
++            .setTitle(R.string.permission_request)
++            .setMessage(getRequestRtcList(host, resources))
++            .setPositiveButton(R.string.allow) { _, _ -> onGrant(true) }
++            .setNegativeButton(R.string.block) { _, _ -> onGrant(false) }
++            .setOnCancelListener { onGrant(false) }
++            .show()
+     }
+ 
+     private fun getRequestRtcList(host: String, resources: Array<String>): String {
+diff --git a/browser/src/main/java/jp/hazuki/yuzubrowser/browser/di/ActivityModule.kt b/browser/src/main/java/jp/hazuki/yuzubrowser/browser/di/ActivityModule.kt
+deleted file mode 100644
+index 80505f7a..00000000
+--- a/browser/src/main/java/jp/hazuki/yuzubrowser/browser/di/ActivityModule.kt
++++ /dev/null
+@@ -1,30 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.browser.di
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.browser.BrowserActivity
+-import jp.hazuki.yuzubrowser.download.DownloadDialogModule
+-import jp.hazuki.yuzubrowser.legacy.di.WebViewModule
+-
+-@Module
+-abstract class ActivityModule {
+-
+-    @ContributesAndroidInjector(modules = [WebViewModule::class, DownloadDialogModule::class])
+-    abstract fun contributeBrowserActivity(): BrowserActivity
+-}
+\ No newline at end of file
+diff --git a/build.gradle b/build.gradle
+index 6f4f2e74..7d577bb5 100644
+--- a/build.gradle
++++ b/build.gradle
+@@ -26,6 +26,7 @@ buildscript {
+     dependencies {
+         classpath 'com.android.tools.build:gradle:4.1.2'
+         classpath Dependencies.kotlin_plugin
++        classpath Dagger.hiltPlugin
+         classpath 'com.github.ben-manes:gradle-versions-plugin:0.36.0'
+         classpath 'com.android.tools.build.jetifier:jetifier-processor:1.0.0-beta10'
+         classpath 'com.google.gms:google-services:4.3.5'
+diff --git a/buildSrc/src/main/java/Dependencies.kt b/buildSrc/src/main/java/Dependencies.kt
+index 2d748fa1..06d0391d 100644
+--- a/buildSrc/src/main/java/Dependencies.kt
++++ b/buildSrc/src/main/java/Dependencies.kt
+@@ -41,7 +41,6 @@ object Versions {
+     const val documentFile = "1.0.1"
+     const val print = "1.0.0"
+     const val swipeRefreshLayout = "1.1.0"
+-    const val dagger = "2.33"
+     const val moshi = "1.11.0"
+     const val okhttp = "4.9.1"
+     const val okio = "2.10.0"
+@@ -106,13 +105,6 @@ object Libs {
+     const val kvs_schema = "com.rejasupotaro:kvs-schema:${Versions.kvs_schema}"
+     const val kvs_schema_compiler = "com.rejasupotaro:kvs-schema-compiler:${Versions.kvs_schema}"
+ 
+-    //Dagger DI
+-    const val dagger2 = "com.google.dagger:dagger:${Versions.dagger}"
+-    const val dagger2_compiler = "com.google.dagger:dagger-compiler:${Versions.dagger}"
+-    const val dagger_android = "com.google.dagger:dagger-android:${Versions.dagger}"
+-    const val dagger_android_support = "com.google.dagger:dagger-android-support:${Versions.dagger}"
+-    const val dagger_android_processor = "com.google.dagger:dagger-android-processor:${Versions.dagger}"
+-
+     //Test
+     const val junit = "junit:junit:${Versions.junit}"
+     const val espressoCore = "androidx.test.espresso:espresso-core:${Versions.espresso}"
+@@ -134,3 +126,11 @@ object Libs {
+ object Dependencies {
+     const val kotlin_plugin = "org.jetbrains.kotlin:kotlin-gradle-plugin:${Versions.kotlin}"
+ }
++
++object Dagger {
++    private const val hiltVersion = "2.33-beta"
++
++    const val hiltPlugin = "com.google.dagger:hilt-android-gradle-plugin:$hiltVersion"
++    const val hilt = "com.google.dagger:hilt-android:$hiltVersion"
++    const val hiltCompiler = "com.google.dagger:hilt-compiler:$hiltVersion"
++}
+diff --git a/legacy/build.gradle b/legacy/build.gradle
+index c050f126..5a2bc27f 100644
+--- a/legacy/build.gradle
++++ b/legacy/build.gradle
+@@ -18,6 +18,7 @@ apply plugin: 'com.android.library'
+ apply plugin: 'kotlin-android'
+ apply plugin: 'kotlin-kapt'
+ apply plugin: 'kotlin-parcelize'
++apply plugin: 'dagger.hilt.android.plugin'
+ 
+ android {
+     compileSdkVersion Build.compile_sdk_version
+@@ -90,13 +91,6 @@ dependencies {
+     implementation AndroidX.documentFile
+     implementation AndroidX.webkit
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
+-
+     implementation Libs.okhttp
+     implementation Libs.okio
+     implementation Libs.moshi
+@@ -123,13 +117,8 @@ dependencies {
+     implementation Libs.kotlin_coroutines
+     implementation Libs.kotlin_coroutines_android
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    kaptTest Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
++    implementation Dagger.hilt
++    kapt Dagger.hiltCompiler
+ 
+     implementation AndroidX.room
+     implementation AndroidX.roomKtx
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/browser/BrowserBaseActivity.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/browser/BrowserBaseActivity.kt
+index 7895d5a2..5649e542 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/browser/BrowserBaseActivity.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/browser/BrowserBaseActivity.kt
+@@ -17,11 +17,13 @@
+ package jp.hazuki.yuzubrowser.legacy.browser
+ 
+ import android.annotation.SuppressLint
+-import jp.hazuki.yuzubrowser.ui.app.DaggerLongPressFixActivity
++import androidx.fragment.app.DialogFragment
++import androidx.fragment.app.FragmentManager
++import jp.hazuki.yuzubrowser.ui.app.LongPressFixActivity
+ import java.util.*
+ 
+ @SuppressLint("Registered")
+-open class BrowserBaseActivity : DaggerLongPressFixActivity() {
++open class BrowserBaseActivity : LongPressFixActivity() {
+ 
+     private val dialogQueue = ArrayDeque<DialogNode>(4)
+     private var isResumed = false
+@@ -40,7 +42,7 @@ open class BrowserBaseActivity : DaggerLongPressFixActivity() {
+         isResumed = false
+     }
+ 
+-    fun showDialog(dialog: androidx.fragment.app.DialogFragment, tag: String) {
++    fun showDialog(dialog: DialogFragment, tag: String) {
+         if (isResumed) {
+             dialog.show(supportFragmentManager, tag)
+         } else {
+@@ -48,7 +50,7 @@ open class BrowserBaseActivity : DaggerLongPressFixActivity() {
+         }
+     }
+ 
+-    private class DialogNode(val dialog: androidx.fragment.app.DialogFragment, val tag: String) {
+-        fun show(fragmentManager: androidx.fragment.app.FragmentManager) = dialog.show(fragmentManager, tag)
++    private class DialogNode(val dialog: DialogFragment, val tag: String) {
++        fun show(fragmentManager: FragmentManager) = dialog.show(fragmentManager, tag)
+     }
+ }
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/di/LegacyUiModule.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/di/LegacyUiModule.kt
+deleted file mode 100644
+index 91552d62..00000000
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/di/LegacyUiModule.kt
++++ /dev/null
+@@ -1,32 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.legacy.di
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.legacy.reader.ReaderFragment
+-import jp.hazuki.yuzubrowser.legacy.webrtc.ui.WebPermissionFragment
+-
+-@Module
+-abstract class LegacyUiModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeReaderFragment(): ReaderFragment
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeWebPermissionsFragment(): WebPermissionFragment
+-}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/di/WebViewModule.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/di/WebViewModule.kt
+index 131d8735..5524f58d 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/di/WebViewModule.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/di/WebViewModule.kt
+@@ -19,13 +19,15 @@ package jp.hazuki.yuzubrowser.legacy.di
+ import com.squareup.moshi.Moshi
+ import dagger.Module
+ import dagger.Provides
++import dagger.hilt.InstallIn
++import dagger.hilt.android.components.ActivityComponent
+ import jp.hazuki.yuzubrowser.webview.WebViewFactory
+ 
+ @Module
++@InstallIn(ActivityComponent::class)
+ object WebViewModule {
+ 
+     @Provides
+-    @JvmStatic
+     fun provideWebViewFactory(moshi: Moshi): WebViewFactory {
+         return WebViewFactory(moshi)
+     }
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/reader/ReaderActivity.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/reader/ReaderActivity.kt
+index 10d2b8df..10c7ecbf 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/reader/ReaderActivity.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/reader/ReaderActivity.kt
+@@ -22,11 +22,13 @@ import android.view.MenuItem
+ import android.view.WindowInsets
+ import android.view.WindowManager
+ import androidx.appcompat.app.AppCompatDelegate
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.legacy.Constants
+ import jp.hazuki.yuzubrowser.legacy.R
+ import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ import jp.hazuki.yuzubrowser.ui.settings.AppPrefs
+ 
++@AndroidEntryPoint
+ class ReaderActivity : ThemeActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/reader/ReaderFragment.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/reader/ReaderFragment.kt
+index eab7db43..c7eab370 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/reader/ReaderFragment.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/reader/ReaderFragment.kt
+@@ -28,7 +28,8 @@ import android.view.ViewGroup
+ import android.widget.TextView
+ import android.widget.Toast
+ import androidx.fragment.app.DialogFragment
+-import dagger.android.support.DaggerFragment
++import androidx.fragment.app.Fragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.core.utility.extensions.convertDpToPx
+ import jp.hazuki.yuzubrowser.core.utility.extensions.isInstanceOf
+ import jp.hazuki.yuzubrowser.core.utility.utils.ui
+@@ -43,7 +44,8 @@ import okhttp3.OkHttpClient
+ import java.io.File
+ import javax.inject.Inject
+ 
+-class ReaderFragment : DaggerFragment() {
++@AndroidEntryPoint
++class ReaderFragment : Fragment() {
+ 
+     private lateinit var titleTextView: TextView
+     private lateinit var bodyTextView: TextView
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/activity/ImportExportFragment.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/activity/ImportExportFragment.kt
+index 9ba44b88..43958a32 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/activity/ImportExportFragment.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/activity/ImportExportFragment.kt
+@@ -24,7 +24,7 @@ import android.os.*
+ import android.widget.Toast
+ import androidx.documentfile.provider.DocumentFile
+ import androidx.preference.Preference
+-import dagger.android.support.AndroidSupportInjection
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.bookmark.item.BookmarkFolder
+ import jp.hazuki.yuzubrowser.bookmark.netscape.exportHtmlBookmark
+ import jp.hazuki.yuzubrowser.bookmark.netscape.importHtmlBookmark
+@@ -46,12 +46,12 @@ import java.io.File
+ import java.io.IOException
+ import javax.inject.Inject
+ 
++@AndroidEntryPoint
+ class ImportExportFragment : YuzuPreferenceFragment() {
+     @Inject
+     internal lateinit var faviconManager: FaviconManager
+ 
+     override fun onCreateYuzuPreferences(savedInstanceState: Bundle?, rootKey: String?) {
+-        AndroidSupportInjection.inject(this)
+         addPreferencesFromResource(R.xml.pref_import_export)
+ 
+         findPreference<Preference>("import_sd_bookmark")!!.setOnPreferenceClickListener {
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/activity/MainSettingsActivity.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/activity/MainSettingsActivity.kt
+index 7d2dc94c..83e6bf04 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/activity/MainSettingsActivity.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/activity/MainSettingsActivity.kt
+@@ -24,11 +24,13 @@ import android.view.Menu
+ import android.view.MenuItem
+ import androidx.preference.PreferenceFragmentCompat
+ import androidx.preference.PreferenceScreen
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.core.utility.extensions.getResColor
+ import jp.hazuki.yuzubrowser.legacy.R
+ import jp.hazuki.yuzubrowser.legacy.debug.DebugActivity
+ import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ 
++@AndroidEntryPoint
+ class MainSettingsActivity : ThemeActivity(), PreferenceFragmentCompat.OnPreferenceStartScreenCallback, ReplaceFragmentListener {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+@@ -49,8 +51,8 @@ class MainSettingsActivity : ThemeActivity(), PreferenceFragmentCompat.OnPrefere
+ 
+         if (savedInstanceState == null) {
+             supportFragmentManager.beginTransaction()
+-                    .replace(R.id.container, MainSettingsFragment())
+-                    .commit()
++                .replace(R.id.container, MainSettingsFragment())
++                .commit()
+         }
+     }
+ 
+@@ -92,8 +94,8 @@ class MainSettingsActivity : ThemeActivity(), PreferenceFragmentCompat.OnPrefere
+ 
+     override fun replaceFragment(fragment: androidx.fragment.app.Fragment, key: String) {
+         supportFragmentManager.beginTransaction()
+-                .replace(R.id.container, fragment)
+-                .addToBackStack(key)
+-                .commit()
++            .replace(R.id.container, fragment)
++            .addToBackStack(key)
++            .commit()
+     }
+ }
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/di/SettingsModule.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/di/SettingsModule.kt
+deleted file mode 100644
+index bf67157d..00000000
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/di/SettingsModule.kt
++++ /dev/null
+@@ -1,32 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.legacy.settings.di
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.legacy.settings.activity.ImportExportFragment
+-import jp.hazuki.yuzubrowser.legacy.settings.preference.ClearBrowserDataAlertDialog
+-
+-@Module
+-abstract class SettingsModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeClearBrowserDataAlertDialog(): ClearBrowserDataAlertDialog.ClearDialog
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeImportExportFragment(): ImportExportFragment
+-}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/preference/ClearBrowserDataAlertDialog.java b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/preference/ClearBrowserDataAlertDialog.java
+deleted file mode 100644
+index 938531a0..00000000
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/preference/ClearBrowserDataAlertDialog.java
++++ /dev/null
+@@ -1,158 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.legacy.settings.preference;
+-
+-import android.app.AlertDialog;
+-import android.app.Dialog;
+-import android.content.Context;
+-import android.os.Bundle;
+-import android.util.AttributeSet;
+-import android.webkit.CookieManager;
+-import android.webkit.WebViewDatabase;
+-import android.widget.ArrayAdapter;
+-import android.widget.ListView;
+-
+-import javax.inject.Inject;
+-
+-import androidx.annotation.NonNull;
+-import dagger.android.support.AndroidSupportInjection;
+-import jp.hazuki.yuzubrowser.favicon.FaviconManager;
+-import jp.hazuki.yuzubrowser.history.repository.BrowserHistoryManager;
+-import jp.hazuki.yuzubrowser.legacy.R;
+-import jp.hazuki.yuzubrowser.legacy.browser.BrowserManager;
+-import jp.hazuki.yuzubrowser.ui.BrowserApplication;
+-import jp.hazuki.yuzubrowser.ui.preference.CustomDialogPreference;
+-import jp.hazuki.yuzubrowser.ui.settings.AppPrefs;
+-
+-public class ClearBrowserDataAlertDialog extends CustomDialogPreference {
+-
+-
+-    public ClearBrowserDataAlertDialog(Context context) {
+-        this(context, null);
+-    }
+-
+-    public ClearBrowserDataAlertDialog(Context context, AttributeSet attrs) {
+-        super(context, attrs);
+-    }
+-
+-    @NonNull
+-    @Override
+-    protected CustomDialogFragment crateCustomDialog() {
+-        return new ClearDialog();
+-    }
+-
+-    public static class ClearDialog extends CustomDialogFragment {
+-        private int mSelected = 0;
+-        private int mArrayMax;
+-
+-        private int[] ids;
+-
+-        @Inject
+-        FaviconManager faviconManager;
+-
+-        @NonNull
+-        @Override
+-        public Dialog onCreateDialog(Bundle savedInstanceState) {
+-            AndroidSupportInjection.inject(this);
+-            mSelected = AppPrefs.clear_data_default.get();
+-
+-            final Context context = requireContext();
+-
+-            String[] arrays = context.getResources().getStringArray(R.array.clear_browser_data);
+-            ids = context.getResources().getIntArray(R.array.clear_browser_data_id);
+-
+-            if (arrays.length != ids.length) {
+-                throw new RuntimeException();
+-            }
+-
+-            mArrayMax = arrays.length;
+-
+-            final ListView listView = new ListView(context);
+-            listView.setAdapter(new ArrayAdapter<>(context, R.layout.select_dialog_multichoice, arrays));
+-            listView.setItemsCanFocus(false);
+-            listView.setChoiceMode(ListView.CHOICE_MODE_MULTIPLE);
+-
+-            for (int i = 0; i < mArrayMax; ++i) {
+-                int shifted = 1 << i;
+-                listView.setItemChecked(i, ((mSelected & shifted) == shifted));
+-            }
+-            listView.setOnItemClickListener((parent, view, position, id) -> {
+-                if (listView.isItemChecked(position))
+-                    mSelected |= 1 << position;
+-                else
+-                    mSelected &= ~(1 << position);
+-            });
+-
+-            AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
+-
+-            builder
+-                    .setTitle(R.string.pref_clear_browser_data)
+-                    .setView(listView)
+-                    .setPositiveButton(android.R.string.ok, (dialog, which) -> onClickPositiveButton())
+-                    .setNegativeButton(android.R.string.cancel, null);
+-
+-            return builder.create();
+-        }
+-
+-        private void onClickPositiveButton() {
+-            for (int i = 0; i < mArrayMax; ++i) {
+-                int shifted = 1 << i;
+-                if ((mSelected & shifted) == shifted)
+-                    runAction(ids[i]);
+-            }
+-
+-            AppPrefs.clear_data_default.set(mSelected);
+-            AppPrefs.commit(requireContext().getApplicationContext(), AppPrefs.clear_data_default);
+-        }
+-
+-        private void runAction(int i) {
+-            Context con = requireContext();
+-            switch (i) {
+-                case 0:
+-                    BrowserManager.clearAppCacheFile(con.getApplicationContext());
+-                    BrowserManager.clearCache(con.getApplicationContext());
+-                    break;
+-                case 1:
+-                    CookieManager.getInstance().removeAllCookies(null);
+-                    break;
+-                case 2:
+-                    WebViewDatabase.getInstance(con.getApplicationContext()).clearHttpAuthUsernamePassword();
+-                    break;
+-                case 3:
+-                    WebViewDatabase.getInstance(con).clearFormData();
+-                    break;
+-                case 4:
+-                    BrowserManager.clearWebDatabase();
+-                    break;
+-                case 5:
+-                    BrowserManager.clearGeolocation();
+-                    break;
+-                case 6:
+-                    BrowserHistoryManager.getInstance(con.getApplicationContext()).deleteAll();
+-                    break;
+-                case 7:
+-                    con.getApplicationContext().getContentResolver().delete(
+-                            ((BrowserApplication)con.getApplicationContext()).getProviderManager().getSuggestProvider().getUriLocal()
+-                            , null, null);
+-                    break;
+-                case 8:
+-                    faviconManager.clear();
+-                    break;
+-            }
+-        }
+-    }
+-}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/preference/ClearBrowserDataAlertDialog.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/preference/ClearBrowserDataAlertDialog.kt
+new file mode 100644
+index 00000000..b511a3ef
+--- /dev/null
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/settings/preference/ClearBrowserDataAlertDialog.kt
+@@ -0,0 +1,110 @@
++/*
++ * Copyright (C) 2017-2019 Hazuki
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package jp.hazuki.yuzubrowser.legacy.settings.preference
++
++import android.app.AlertDialog
++import android.app.Dialog
++import android.content.Context
++import android.os.Bundle
++import android.util.AttributeSet
++import android.webkit.CookieManager
++import android.webkit.WebViewDatabase
++import android.widget.AdapterView
++import android.widget.ArrayAdapter
++import android.widget.ListView
++import dagger.hilt.android.AndroidEntryPoint
++import jp.hazuki.yuzubrowser.favicon.FaviconManager
++import jp.hazuki.yuzubrowser.history.repository.BrowserHistoryManager
++import jp.hazuki.yuzubrowser.legacy.R
++import jp.hazuki.yuzubrowser.legacy.browser.BrowserManager
++import jp.hazuki.yuzubrowser.ui.BrowserApplication
++import jp.hazuki.yuzubrowser.ui.preference.CustomDialogPreference
++import jp.hazuki.yuzubrowser.ui.settings.AppPrefs
++import javax.inject.Inject
++
++class ClearBrowserDataAlertDialog @JvmOverloads constructor(context: Context?, attrs: AttributeSet? = null) : CustomDialogPreference(context, attrs) {
++    override fun crateCustomDialog(): CustomDialogFragment = ClearDialog()
++
++    @AndroidEntryPoint
++    class ClearDialog : CustomDialogFragment() {
++        private var mSelected = 0
++        private var mArrayMax = 0
++        private lateinit var ids: IntArray
++
++        @Inject
++        lateinit var faviconManager: FaviconManager
++
++        override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
++            mSelected = AppPrefs.clear_data_default.get()
++            val context = requireContext()
++            val arrays = context.resources.getStringArray(R.array.clear_browser_data)
++            ids = context.resources.getIntArray(R.array.clear_browser_data_id)
++            if (arrays.size != ids.size) {
++                throw RuntimeException()
++            }
++            mArrayMax = arrays.size
++            val listView = ListView(context)
++            listView.adapter = ArrayAdapter(context, R.layout.select_dialog_multichoice, arrays)
++            listView.itemsCanFocus = false
++            listView.choiceMode = ListView.CHOICE_MODE_MULTIPLE
++            for (i in 0 until mArrayMax) {
++                val shifted = 1 shl i
++                listView.setItemChecked(i, mSelected and shifted == shifted)
++            }
++            listView.onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
++                mSelected = if (listView.isItemChecked(position)) {
++                    mSelected or (1 shl position)
++                } else {
++                    mSelected and (1 shl position).inv()
++                }
++            }
++            return AlertDialog.Builder(activity)
++                .setTitle(R.string.pref_clear_browser_data)
++                .setView(listView)
++                .setPositiveButton(android.R.string.ok) { _, _ -> onClickPositiveButton() }
++                .setNegativeButton(android.R.string.cancel, null)
++                .create()
++        }
++
++        private fun onClickPositiveButton() {
++            for (i in 0 until mArrayMax) {
++                val shifted = 1 shl i
++                if (mSelected and shifted == shifted) runAction(ids[i])
++            }
++            AppPrefs.clear_data_default.set(mSelected)
++            AppPrefs.commit(requireContext().applicationContext, AppPrefs.clear_data_default)
++        }
++
++        private fun runAction(i: Int) {
++            val con = requireContext()
++            when (i) {
++                0 -> {
++                    BrowserManager.clearAppCacheFile(con.applicationContext)
++                    BrowserManager.clearCache(con.applicationContext)
++                }
++                1 -> CookieManager.getInstance().removeAllCookies(null)
++                2 -> WebViewDatabase.getInstance(con.applicationContext).clearHttpAuthUsernamePassword()
++                3 -> WebViewDatabase.getInstance(con).clearFormData()
++                4 -> BrowserManager.clearWebDatabase()
++                5 -> BrowserManager.clearGeolocation()
++                6 -> BrowserHistoryManager.getInstance(con.applicationContext).deleteAll()
++                7 -> con.applicationContext.contentResolver.delete(
++                    (con.applicationContext as BrowserApplication).providerManager.suggestProvider.uriLocal, null, null)
++                8 -> faviconManager.clear()
++            }
++        }
++    }
++}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentListActivity.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentListActivity.kt
+index fe485107..54cf3214 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentListActivity.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentListActivity.kt
+@@ -18,14 +18,16 @@ package jp.hazuki.yuzubrowser.legacy.useragent
+ 
+ import android.content.Intent
+ import android.os.Bundle
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ 
++@AndroidEntryPoint
+ class UserAgentListActivity : ThemeActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+         UserAgentListDialog
+             .newInstance(intent.getStringExtra(Intent.EXTRA_TEXT)!!)
+-                .show(supportFragmentManager, "ua")
++            .show(supportFragmentManager, "ua")
+     }
+ }
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentListDialog.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentListDialog.kt
+index 337c3b91..23e5e5be 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentListDialog.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentListDialog.kt
+@@ -25,7 +25,7 @@ import android.os.Bundle
+ import android.webkit.WebSettings
+ import androidx.fragment.app.DialogFragment
+ import com.squareup.moshi.Moshi
+-import dagger.android.support.AndroidSupportInjection
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.core.USER_AGENT_PC
+ import jp.hazuki.yuzubrowser.core.utility.extensions.getChromePcUserAgent
+ import jp.hazuki.yuzubrowser.core.utility.extensions.getFakeChromeUserAgent
+@@ -34,6 +34,7 @@ import jp.hazuki.yuzubrowser.legacy.R
+ import jp.hazuki.yuzubrowser.ui.settings.AppPrefs
+ import javax.inject.Inject
+ 
++@AndroidEntryPoint
+ class UserAgentListDialog : DialogFragment() {
+ 
+     @Inject
+@@ -41,7 +42,6 @@ class UserAgentListDialog : DialogFragment() {
+ 
+     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+         val activity = activity ?: throw IllegalStateException()
+-        AndroidSupportInjection.inject(this)
+         val mUserAgentList = UserAgentList()
+         mUserAgentList.read(activity, moshi)
+ 
+@@ -76,13 +76,13 @@ class UserAgentListDialog : DialogFragment() {
+ 
+         val builder = AlertDialog.Builder(activity)
+         builder.setTitle(R.string.useragent)
+-                .setSingleChoiceItems(entries, pos) { _, which ->
+-                    val intent = Intent()
+-                    intent.putExtra(Intent.EXTRA_TEXT, if (which == 0) "" else entryValues[which])
+-                    activity.setResult(RESULT_OK, intent)
+-                    dismiss()
+-                }
+-                .setNegativeButton(R.string.cancel, null)
++            .setSingleChoiceItems(entries, pos) { _, which ->
++                val intent = Intent()
++                intent.putExtra(Intent.EXTRA_TEXT, if (which == 0) "" else entryValues[which])
++                activity.setResult(RESULT_OK, intent)
++                dismiss()
++            }
++            .setNegativeButton(R.string.cancel, null)
+         return builder.create()
+     }
+ 
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentModule.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentModule.kt
+deleted file mode 100644
+index 2833a12f..00000000
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentModule.kt
++++ /dev/null
+@@ -1,30 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.legacy.useragent
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-
+-@Module
+-abstract class UserAgentModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeUserAgentListDialog(): UserAgentListDialog
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeUserAgentSettingFragment(): UserAgentSettingFragment
+-}
+\ No newline at end of file
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingActivity.java b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingActivity.java
+deleted file mode 100644
+index bd1e5e5c..00000000
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingActivity.java
++++ /dev/null
+@@ -1,52 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.legacy.useragent;
+-
+-import android.os.Bundle;
+-import android.view.MenuItem;
+-
+-import androidx.appcompat.app.ActionBar;
+-import jp.hazuki.yuzubrowser.legacy.R;
+-import jp.hazuki.yuzubrowser.ui.app.ThemeActivity;
+-
+-public class UserAgentSettingActivity extends ThemeActivity {
+-
+-
+-    @Override
+-    protected void onCreate(Bundle savedInstanceState) {
+-        super.onCreate(savedInstanceState);
+-        setContentView(R.layout.fragment_base);
+-        ActionBar actionBar = getSupportActionBar();
+-        if (actionBar != null)
+-            actionBar.setDisplayHomeAsUpEnabled(true);
+-
+-        getSupportFragmentManager().beginTransaction()
+-                .replace(R.id.container, new UserAgentSettingFragment()).commit();
+-
+-    }
+-
+-    @Override
+-    public boolean onOptionsItemSelected(MenuItem item) {
+-        switch (item.getItemId()) {
+-            case android.R.id.home:
+-                finish();
+-                return true;
+-            default:
+-                return super.onOptionsItemSelected(item);
+-        }
+-    }
+-}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingActivity.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingActivity.kt
+new file mode 100644
+index 00000000..5d9de686
+--- /dev/null
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingActivity.kt
+@@ -0,0 +1,44 @@
++/*
++ * Copyright (C) 2017-2019 Hazuki
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package jp.hazuki.yuzubrowser.legacy.useragent
++
++import android.os.Bundle
++import android.view.MenuItem
++import dagger.hilt.android.AndroidEntryPoint
++import jp.hazuki.yuzubrowser.legacy.R
++import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
++
++@AndroidEntryPoint
++class UserAgentSettingActivity : ThemeActivity() {
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        setContentView(R.layout.fragment_base)
++        val actionBar = supportActionBar
++        actionBar?.setDisplayHomeAsUpEnabled(true)
++        supportFragmentManager.beginTransaction()
++            .replace(R.id.container, UserAgentSettingFragment()).commit()
++    }
++
++    override fun onOptionsItemSelected(item: MenuItem): Boolean {
++        return when (item.itemId) {
++            android.R.id.home -> {
++                finish()
++                true
++            }
++            else -> super.onOptionsItemSelected(item)
++        }
++    }
++}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingFragment.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingFragment.kt
+index b5cef263..f67dbd1a 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingFragment.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/useragent/UserAgentSettingFragment.kt
+@@ -20,10 +20,12 @@ import android.content.Context
+ import android.os.Bundle
+ import android.view.*
+ import android.widget.Toast
++import androidx.fragment.app.Fragment
+ import androidx.recyclerview.widget.ItemTouchHelper
+ import com.google.android.material.snackbar.Snackbar
+ import com.squareup.moshi.Moshi
+-import dagger.android.support.DaggerFragment
++import dagger.hilt.android.AndroidEntryPoint
++import dagger.hilt.android.qualifiers.ApplicationContext
+ import jp.hazuki.yuzubrowser.legacy.R
+ import jp.hazuki.yuzubrowser.legacy.databinding.RecyclerWithFabBinding
+ import jp.hazuki.yuzubrowser.legacy.useragent.SelectActionDialog.DELETE
+@@ -33,7 +35,8 @@ import jp.hazuki.yuzubrowser.ui.widget.recycler.DividerItemDecoration
+ import jp.hazuki.yuzubrowser.ui.widget.recycler.OnRecyclerListener
+ import javax.inject.Inject
+ 
+-class UserAgentSettingFragment : DaggerFragment(), DeleteUserAgentDialog.OnDelete, EditUserAgentDialog.OnEditedUserAgent, SelectActionDialog.OnActionSelect, OnRecyclerListener {
++@AndroidEntryPoint
++class UserAgentSettingFragment : Fragment(), DeleteUserAgentDialog.OnDelete, EditUserAgentDialog.OnEditedUserAgent, SelectActionDialog.OnActionSelect, OnRecyclerListener {
+     private lateinit var mUserAgentList: UserAgentList
+     private lateinit var mAdapter: UserAgentRecyclerAdapter
+ 
+@@ -41,6 +44,7 @@ class UserAgentSettingFragment : DaggerFragment(), DeleteUserAgentDialog.OnDelet
+     lateinit var moshi: Moshi
+ 
+     @Inject
++    @ApplicationContext
+     lateinit var applicationContext: Context
+ 
+     private var viewBinding: RecyclerWithFabBinding? = null
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListActivity.java b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListActivity.java
+deleted file mode 100644
+index 842fb504..00000000
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListActivity.java
++++ /dev/null
+@@ -1,34 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.legacy.webencode;
+-
+-import android.content.Intent;
+-import android.os.Bundle;
+-
+-import jp.hazuki.yuzubrowser.ui.app.ThemeActivity;
+-
+-public class WebTextEncodeListActivity extends ThemeActivity {
+-
+-    @Override
+-    protected void onCreate(Bundle savedInstanceState) {
+-        super.onCreate(savedInstanceState);
+-        WebTextEncodeListDialog.Companion
+-                .newInstance(getIntent().getStringExtra(Intent.EXTRA_TEXT))
+-                .show(getSupportFragmentManager(), "list");
+-    }
+-
+-}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebEncodeModule.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListActivity.kt
+similarity index 54%
+rename from legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebEncodeModule.kt
+rename to legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListActivity.kt
+index 19a304d6..a536c378 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebEncodeModule.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListActivity.kt
+@@ -13,18 +13,19 @@
+  * See the License for the specific language governing permissions and
+  * limitations under the License.
+  */
+-
+ package jp.hazuki.yuzubrowser.legacy.webencode
+ 
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-
+-@Module
+-abstract class WebEncodeModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeWebTextEncodeListDialog(): WebTextEncodeListDialog
++import android.content.Intent
++import android.os.Bundle
++import dagger.hilt.android.AndroidEntryPoint
++import jp.hazuki.yuzubrowser.legacy.webencode.WebTextEncodeListDialog.Companion.newInstance
++import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ 
+-    @ContributesAndroidInjector
+-    abstract fun contributeWebTextEncodeSettingFragment(): WebTextEncodeSettingFragment
+-}
+\ No newline at end of file
++@AndroidEntryPoint
++class WebTextEncodeListActivity : ThemeActivity() {
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        newInstance(intent.getStringExtra(Intent.EXTRA_TEXT)!!)
++            .show(supportFragmentManager, "list")
++    }
++}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListDialog.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListDialog.kt
+index 26acea11..2a10fb96 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListDialog.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeListDialog.kt
+@@ -24,10 +24,11 @@ import android.content.Intent
+ import android.os.Bundle
+ import androidx.fragment.app.DialogFragment
+ import com.squareup.moshi.Moshi
+-import dagger.android.support.AndroidSupportInjection
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.legacy.R
+ import javax.inject.Inject
+ 
++@AndroidEntryPoint
+ class WebTextEncodeListDialog : DialogFragment() {
+ 
+     @Inject
+@@ -35,14 +36,13 @@ class WebTextEncodeListDialog : DialogFragment() {
+ 
+     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
+         val activity = activity ?: throw IllegalStateException()
+-        AndroidSupportInjection.inject(this)
+ 
+         val encodes = WebTextEncodeList()
+         encodes.read(activity, moshi)
+ 
+         val entries = arrayOfNulls<String>(encodes.size)
+ 
+-        var now = arguments!!.getString(ENCODING)
++        var now = requireArguments().getString(ENCODING)
+ 
+         if (now == null) now = ""
+ 
+@@ -61,13 +61,13 @@ class WebTextEncodeListDialog : DialogFragment() {
+ 
+         val builder = AlertDialog.Builder(activity)
+         builder.setTitle(R.string.web_encode)
+-                .setSingleChoiceItems(entries, pos) { _, which ->
+-                    val intent = Intent()
+-                    intent.putExtra(Intent.EXTRA_TEXT, entries[which])
+-                    activity.setResult(RESULT_OK, intent)
+-                    dismiss()
+-                }
+-                .setNegativeButton(R.string.cancel, null)
++            .setSingleChoiceItems(entries, pos) { _, which ->
++                val intent = Intent()
++                intent.putExtra(Intent.EXTRA_TEXT, entries[which])
++                activity.setResult(RESULT_OK, intent)
++                dismiss()
++            }
++            .setNegativeButton(R.string.cancel, null)
+         return builder.create()
+     }
+ 
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingActivity.java b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingActivity.java
+deleted file mode 100644
+index b02122d4..00000000
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingActivity.java
++++ /dev/null
+@@ -1,51 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.legacy.webencode;
+-
+-import android.os.Bundle;
+-import android.view.MenuItem;
+-
+-import androidx.appcompat.app.ActionBar;
+-import jp.hazuki.yuzubrowser.legacy.R;
+-import jp.hazuki.yuzubrowser.ui.app.ThemeActivity;
+-
+-public class WebTextEncodeSettingActivity extends ThemeActivity {
+-
+-    @Override
+-    protected void onCreate(Bundle savedInstanceState) {
+-        super.onCreate(savedInstanceState);
+-        setContentView(R.layout.fragment_base);
+-        ActionBar actionBar = getSupportActionBar();
+-        if (actionBar != null)
+-            actionBar.setDisplayHomeAsUpEnabled(true);
+-
+-        getSupportFragmentManager().beginTransaction()
+-                .replace(R.id.container, new WebTextEncodeSettingFragment()).commit();
+-
+-    }
+-
+-    @Override
+-    public boolean onOptionsItemSelected(MenuItem item) {
+-        switch (item.getItemId()) {
+-            case android.R.id.home:
+-                finish();
+-                return true;
+-            default:
+-                return super.onOptionsItemSelected(item);
+-        }
+-    }
+-}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingActivity.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingActivity.kt
+new file mode 100644
+index 00000000..2bf4541e
+--- /dev/null
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingActivity.kt
+@@ -0,0 +1,44 @@
++/*
++ * Copyright (C) 2017-2019 Hazuki
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *     http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package jp.hazuki.yuzubrowser.legacy.webencode
++
++import android.os.Bundle
++import android.view.MenuItem
++import dagger.hilt.android.AndroidEntryPoint
++import jp.hazuki.yuzubrowser.legacy.R
++import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
++
++@AndroidEntryPoint
++class WebTextEncodeSettingActivity : ThemeActivity() {
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        setContentView(R.layout.fragment_base)
++        val actionBar = supportActionBar
++        actionBar?.setDisplayHomeAsUpEnabled(true)
++        supportFragmentManager.beginTransaction()
++            .replace(R.id.container, WebTextEncodeSettingFragment()).commit()
++    }
++
++    override fun onOptionsItemSelected(item: MenuItem): Boolean {
++        return when (item.itemId) {
++            android.R.id.home -> {
++                finish()
++                true
++            }
++            else -> super.onOptionsItemSelected(item)
++        }
++    }
++}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingFragment.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingFragment.kt
+index 3f78b983..3ca5a51b 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingFragment.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webencode/WebTextEncodeSettingFragment.kt
+@@ -20,13 +20,15 @@ import android.content.Context
+ import android.os.Bundle
+ import android.view.*
+ import android.widget.Toast
++import androidx.fragment.app.Fragment
+ import androidx.recyclerview.widget.ItemTouchHelper
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
+ import com.github.clans.fab.FloatingActionButton
+ import com.google.android.material.snackbar.Snackbar
+ import com.squareup.moshi.Moshi
+-import dagger.android.support.DaggerFragment
++import dagger.hilt.android.AndroidEntryPoint
++import dagger.hilt.android.qualifiers.ApplicationContext
+ import jp.hazuki.yuzubrowser.legacy.R
+ import jp.hazuki.yuzubrowser.legacy.webencode.SelectActionDialog.DELETE
+ import jp.hazuki.yuzubrowser.legacy.webencode.SelectActionDialog.EDIT
+@@ -36,14 +38,17 @@ import jp.hazuki.yuzubrowser.ui.widget.recycler.DividerItemDecoration
+ import jp.hazuki.yuzubrowser.ui.widget.recycler.OnRecyclerListener
+ import javax.inject.Inject
+ 
+-class WebTextEncodeSettingFragment : DaggerFragment(), OnRecyclerListener, EditWebTextEncodeDialog.OnEditedWebTextEncode, SelectActionDialog.OnActionSelect, DeleteDialogCompat.OnDelete {
++@AndroidEntryPoint
++class WebTextEncodeSettingFragment : Fragment(), OnRecyclerListener, EditWebTextEncodeDialog.OnEditedWebTextEncode, SelectActionDialog.OnActionSelect, DeleteDialogCompat.OnDelete {
+     private lateinit var mEncodeList: WebTextEncodeList
+     private lateinit var mAdapter: WebTextEncodeRecyclerAdapter
+     private var rootView: View? = null
+ 
+     @Inject
+     lateinit var moshi: Moshi
++
+     @Inject
++    @ApplicationContext
+     lateinit var applicationContext: Context
+ 
+     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webrtc/ui/WebPermissionActivity.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webrtc/ui/WebPermissionActivity.kt
+index 00d84073..f08e6702 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webrtc/ui/WebPermissionActivity.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webrtc/ui/WebPermissionActivity.kt
+@@ -18,9 +18,11 @@ package jp.hazuki.yuzubrowser.legacy.webrtc.ui
+ 
+ import android.os.Bundle
+ import android.view.MenuItem
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.legacy.R
+ import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ 
++@AndroidEntryPoint
+ class WebPermissionActivity : ThemeActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+@@ -30,8 +32,8 @@ class WebPermissionActivity : ThemeActivity() {
+ 
+         if (savedInstanceState == null) {
+             supportFragmentManager.beginTransaction()
+-                    .replace(R.id.container, WebPermissionFragment())
+-                    .commit()
++                .replace(R.id.container, WebPermissionFragment())
++                .commit()
+         }
+     }
+ 
+@@ -44,4 +46,4 @@ class WebPermissionActivity : ThemeActivity() {
+         }
+         return super.onOptionsItemSelected(item)
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webrtc/ui/WebPermissionFragment.kt b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webrtc/ui/WebPermissionFragment.kt
+index b5c8c2d5..a596135e 100644
+--- a/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webrtc/ui/WebPermissionFragment.kt
++++ b/legacy/src/main/java/jp/hazuki/yuzubrowser/legacy/webrtc/ui/WebPermissionFragment.kt
+@@ -20,9 +20,10 @@ import android.os.Bundle
+ import android.view.LayoutInflater
+ import android.view.View
+ import android.view.ViewGroup
++import androidx.fragment.app.Fragment
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
+-import dagger.android.support.DaggerFragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.core.utility.utils.ui
+ import jp.hazuki.yuzubrowser.legacy.R
+ import jp.hazuki.yuzubrowser.legacy.webrtc.WebPermissionsDao
+@@ -32,7 +33,8 @@ import jp.hazuki.yuzubrowser.ui.widget.recycler.DividerItemDecoration
+ import jp.hazuki.yuzubrowser.ui.widget.recycler.OnRecyclerListener
+ import javax.inject.Inject
+ 
+-class WebPermissionFragment : DaggerFragment(), OnRecyclerListener, WebPermissionsEditDialog.OnPermissionEditedListener {
++@AndroidEntryPoint
++class WebPermissionFragment : Fragment(), OnRecyclerListener, WebPermissionsEditDialog.OnPermissionEditedListener {
+ 
+     @Inject
+     internal lateinit var webPermissionsDao: WebPermissionsDao
+diff --git a/module/adblock/build.gradle b/module/adblock/build.gradle
+index 79b25ef3..b7a21f85 100644
+--- a/module/adblock/build.gradle
++++ b/module/adblock/build.gradle
+@@ -18,6 +18,7 @@ apply plugin: 'com.android.library'
+ apply plugin: 'kotlin-android'
+ apply plugin: 'kotlin-parcelize'
+ apply plugin: 'kotlin-kapt'
++apply plugin: 'dagger.hilt.android.plugin'
+ 
+ android {
+     compileSdkVersion Build.compile_sdk_version
+@@ -82,12 +83,8 @@ dependencies {
+     implementation Libs.kotlin_coroutines
+     implementation Libs.kotlin_coroutines_android
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
++    implementation Dagger.hilt
++    kapt Dagger.hiltCompiler
+ 
+     implementation Libs.kvs_schema
+     kapt Libs.kvs_schema_compiler
+diff --git a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/AdBlockModule.kt b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/AdBlockModule.kt
+index a506602f..18d57832 100644
+--- a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/AdBlockModule.kt
++++ b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/AdBlockModule.kt
+@@ -19,16 +19,19 @@ package jp.hazuki.yuzubrowser.adblock
+ import android.content.Context
+ import dagger.Module
+ import dagger.Provides
++import dagger.hilt.InstallIn
++import dagger.hilt.android.qualifiers.ApplicationContext
++import dagger.hilt.components.SingletonComponent
+ import jp.hazuki.yuzubrowser.adblock.repository.abp.AbpDatabase
+ import javax.inject.Singleton
+ 
+ @Module
+-object AdBlockModule {
++@InstallIn(SingletonComponent::class)
++class AdBlockModule {
+ 
+     @Provides
+     @Singleton
+-    @JvmStatic
+-    fun provideAbpDatabase(context: Context): AbpDatabase {
++    fun provideAbpDatabase(@ApplicationContext context: Context): AbpDatabase {
+         return AbpDatabase.createInstance(context)
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/AdBlockUiModule.kt b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/AdBlockUiModule.kt
+deleted file mode 100644
+index f5622da3..00000000
+--- a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/AdBlockUiModule.kt
++++ /dev/null
+@@ -1,36 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.adblock
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.adblock.service.AbpUpdateService
+-import jp.hazuki.yuzubrowser.adblock.ui.abp.AbpFilterSubscribeDialog
+-import jp.hazuki.yuzubrowser.adblock.ui.abp.AbpFragment
+-
+-@Module
+-abstract class AdBlockUiModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeAbpUpdateService(): AbpUpdateService
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeAbpFragment(): AbpFragment
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeAbpFilterSubscribeDalog(): AbpFilterSubscribeDialog
+-}
+diff --git a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/service/AbpUpdateService.kt b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/service/AbpUpdateService.kt
+index c453c018..85947435 100644
+--- a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/service/AbpUpdateService.kt
++++ b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/service/AbpUpdateService.kt
+@@ -25,7 +25,7 @@ import android.os.Handler
+ import android.os.ResultReceiver
+ import androidx.core.app.JobIntentService
+ import androidx.core.content.getSystemService
+-import dagger.android.AndroidInjection
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.adblock.BROADCAST_ACTION_UPDATE_AD_BLOCK_DATA
+ import jp.hazuki.yuzubrowser.adblock.filter.abp.*
+ import jp.hazuki.yuzubrowser.adblock.filter.unified.UnifiedFilter
+@@ -49,6 +49,7 @@ import java.io.IOException
+ import java.nio.charset.Charset
+ import javax.inject.Inject
+ 
++@AndroidEntryPoint
+ class AbpUpdateService : JobIntentService() {
+ 
+     @Inject
+@@ -72,11 +73,6 @@ class AbpUpdateService : JobIntentService() {
+         }
+     }
+ 
+-    override fun onCreate() {
+-        super.onCreate()
+-        AndroidInjection.inject(this)
+-    }
+-
+     private fun updateAll(forceUpdate: Boolean, resultReceiver: ResultReceiver?) = runBlocking {
+         var result = false
+         var nextUpdateTime = Long.MAX_VALUE
+diff --git a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpActivity.kt b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpActivity.kt
+index 0b0ed17d..98280a02 100644
+--- a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpActivity.kt
++++ b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpActivity.kt
+@@ -17,9 +17,11 @@
+ package jp.hazuki.yuzubrowser.adblock.ui.abp
+ 
+ import android.os.Bundle
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.adblock.R
+ import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ 
++@AndroidEntryPoint
+ class AbpActivity : ThemeActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+@@ -27,7 +29,7 @@ class AbpActivity : ThemeActivity() {
+         setContentView(R.layout.fragment_base)
+ 
+         supportFragmentManager.beginTransaction()
+-                .replace(R.id.container, AbpFragment())
+-                .commit()
++            .replace(R.id.container, AbpFragment())
++            .commit()
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpFilterSubscribeDialog.kt b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpFilterSubscribeDialog.kt
+index a367c323..ffa0fdc2 100644
+--- a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpFilterSubscribeDialog.kt
++++ b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpFilterSubscribeDialog.kt
+@@ -20,7 +20,7 @@ import android.app.AlertDialog
+ import android.app.Dialog
+ import android.os.Bundle
+ import androidx.fragment.app.DialogFragment
+-import dagger.android.support.DaggerDialogFragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.adblock.R
+ import jp.hazuki.yuzubrowser.adblock.repository.abp.AbpDatabase
+ import jp.hazuki.yuzubrowser.adblock.repository.abp.AbpEntity
+@@ -28,7 +28,8 @@ import jp.hazuki.yuzubrowser.adblock.service.AbpUpdateService
+ import jp.hazuki.yuzubrowser.core.utility.utils.ui
+ import javax.inject.Inject
+ 
+-class AbpFilterSubscribeDialog : DaggerDialogFragment() {
++@AndroidEntryPoint
++class AbpFilterSubscribeDialog : DialogFragment() {
+ 
+     @Inject
+     internal lateinit var abpDatabase: AbpDatabase
+diff --git a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpFragment.kt b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpFragment.kt
+index 65946e92..755e26b9 100644
+--- a/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpFragment.kt
++++ b/module/adblock/src/main/java/jp/hazuki/yuzubrowser/adblock/ui/abp/AbpFragment.kt
+@@ -20,10 +20,11 @@ import android.os.Bundle
+ import android.os.Handler
+ import android.os.Looper
+ import android.view.*
++import androidx.fragment.app.Fragment
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
+ import com.google.android.material.floatingactionbutton.FloatingActionButton
+-import dagger.android.support.DaggerFragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.adblock.R
+ import jp.hazuki.yuzubrowser.adblock.filter.abp.getAbpBlackListFile
+ import jp.hazuki.yuzubrowser.adblock.filter.abp.getAbpWhiteListFile
+@@ -38,7 +39,8 @@ import jp.hazuki.yuzubrowser.ui.extensions.applyIconColor
+ import jp.hazuki.yuzubrowser.ui.widget.recycler.OnRecyclerListener
+ import javax.inject.Inject
+ 
+-class AbpFragment : DaggerFragment(), OnRecyclerListener, AddAbpDialog.OnAddItemListener, AbpMenuDialog.OnAbpMenuListener, AbpItemDeleteDialog.OnAbpItemDeleteListener {
++@AndroidEntryPoint
++class AbpFragment : Fragment(), OnRecyclerListener, AddAbpDialog.OnAddItemListener, AbpMenuDialog.OnAbpMenuListener, AbpItemDeleteDialog.OnAbpItemDeleteListener {
+ 
+     @Inject
+     internal lateinit var abpDatabase: AbpDatabase
+diff --git a/module/bookmark/build.gradle b/module/bookmark/build.gradle
+index bb38d108..ef567095 100644
+--- a/module/bookmark/build.gradle
++++ b/module/bookmark/build.gradle
+@@ -17,6 +17,7 @@
+ apply plugin: 'com.android.library'
+ apply plugin: 'kotlin-android'
+ apply plugin: 'kotlin-kapt'
++apply plugin: 'dagger.hilt.android.plugin'
+ 
+ android {
+     compileSdkVersion Build.compile_sdk_version
+@@ -76,13 +77,6 @@ dependencies {
+     implementation AndroidX.fragmentKtx
+     implementation AndroidX.lifecycle
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
+-
+     implementation Libs.okio
+     implementation Libs.moshi
+     kapt Libs.moshiCodeGen
+@@ -97,13 +91,8 @@ dependencies {
+     implementation Libs.kotlin_coroutines
+     implementation Libs.kotlin_coroutines_android
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    kaptTest Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
++    implementation Dagger.hilt
++    kapt Dagger.hiltCompiler
+ 
+     implementation Libs.jsoup
+ }
+diff --git a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/BookmarkOverflowMenuUiModule.kt b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/BookmarkOverflowMenuUiModule.kt
+index 7decdf87..d898c6dd 100644
+--- a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/BookmarkOverflowMenuUiModule.kt
++++ b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/BookmarkOverflowMenuUiModule.kt
+@@ -20,12 +20,15 @@ import android.app.Application
+ import com.squareup.moshi.Moshi
+ import dagger.Module
+ import dagger.Provides
++import dagger.hilt.InstallIn
++import dagger.hilt.android.components.ActivityRetainedComponent
+ import jp.hazuki.yuzubrowser.bookmark.overflow.viewmodel.OverflowMenuViewModel
+ import jp.hazuki.yuzubrowser.bookmark.repository.HideMenuRepository
+ import jp.hazuki.yuzubrowser.bookmark.repository.HideMenuSource
+ 
+ @Module
+-object BookmarkOverflowMenuUiModule {
++@InstallIn(ActivityRetainedComponent::class)
++class BookmarkOverflowMenuUiModule {
+ 
+     @Provides
+     fun provideHideMenuRepository(application: Application, moshi: Moshi): HideMenuRepository {
+diff --git a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/BookmarkUiModule.kt b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/BookmarkUiModule.kt
+deleted file mode 100644
+index a15b5dfc..00000000
+--- a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/BookmarkUiModule.kt
++++ /dev/null
+@@ -1,36 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.bookmark
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.bookmark.overflow.view.BookmarkOverflowMenuFragment
+-import jp.hazuki.yuzubrowser.bookmark.view.BookmarkActivity
+-import jp.hazuki.yuzubrowser.bookmark.view.BookmarkFragment
+-
+-@Module
+-abstract class BookmarkUiModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeBookmarkActivity(): BookmarkActivity
+-
+-    @ContributesAndroidInjector(modules = [BookmarkOverflowMenuUiModule::class])
+-    abstract fun contributeBookmarkFragment(): BookmarkFragment
+-
+-    @ContributesAndroidInjector(modules = [BookmarkOverflowMenuUiModule::class])
+-    abstract fun contributeBookmarkOverflowMenuFragment(): BookmarkOverflowMenuFragment
+-}
+diff --git a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/overflow/view/BookmarkOverflowMenuActivity.kt b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/overflow/view/BookmarkOverflowMenuActivity.kt
+index 872dafe0..f5d80cc5 100644
+--- a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/overflow/view/BookmarkOverflowMenuActivity.kt
++++ b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/overflow/view/BookmarkOverflowMenuActivity.kt
+@@ -20,11 +20,13 @@ import android.content.Context
+ import android.content.Intent
+ import android.os.Bundle
+ import androidx.fragment.app.commit
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.bookmark.R
+ import jp.hazuki.yuzubrowser.bookmark.overflow.HideMenuType
+ import jp.hazuki.yuzubrowser.bookmark.overflow.MenuType
+ import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ 
++@AndroidEntryPoint
+ class BookmarkOverflowMenuActivity : ThemeActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+diff --git a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/overflow/view/BookmarkOverflowMenuFragment.kt b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/overflow/view/BookmarkOverflowMenuFragment.kt
+index 7740e605..cd9670ce 100644
+--- a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/overflow/view/BookmarkOverflowMenuFragment.kt
++++ b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/overflow/view/BookmarkOverflowMenuFragment.kt
+@@ -20,9 +20,10 @@ import android.os.Bundle
+ import android.view.*
+ import androidx.appcompat.view.menu.MenuBuilder
+ import androidx.core.view.forEach
++import androidx.fragment.app.Fragment
+ import androidx.fragment.app.viewModels
+ import androidx.recyclerview.widget.LinearLayoutManager
+-import dagger.android.support.DaggerFragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.bookmark.R
+ import jp.hazuki.bookmark.databinding.FragmentBookmarkOverflowBinding
+ import jp.hazuki.yuzubrowser.bookmark.overflow.HideMenuType
+@@ -30,7 +31,8 @@ import jp.hazuki.yuzubrowser.bookmark.overflow.MenuType
+ import jp.hazuki.yuzubrowser.bookmark.overflow.viewmodel.OverflowMenuViewModel
+ import javax.inject.Inject
+ 
+-class BookmarkOverflowMenuFragment : DaggerFragment() {
++@AndroidEntryPoint
++class BookmarkOverflowMenuFragment : Fragment() {
+     @Inject
+     internal lateinit var factory: OverflowMenuViewModel.Factory
+ 
+diff --git a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/view/BookmarkActivity.kt b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/view/BookmarkActivity.kt
+index 8df747f7..1f392b97 100644
+--- a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/view/BookmarkActivity.kt
++++ b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/view/BookmarkActivity.kt
+@@ -23,13 +23,15 @@ import android.view.MenuItem
+ import android.view.WindowInsets
+ import android.view.WindowManager
+ import androidx.fragment.app.commit
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.bookmark.R
+ import jp.hazuki.yuzubrowser.ui.INTENT_EXTRA_MODE_FULLSCREEN
+ import jp.hazuki.yuzubrowser.ui.INTENT_EXTRA_MODE_ORIENTATION
+-import jp.hazuki.yuzubrowser.ui.app.DaggerLongPressFixActivity
++import jp.hazuki.yuzubrowser.ui.app.LongPressFixActivity
+ import jp.hazuki.yuzubrowser.ui.settings.AppPrefs
+ 
+-class BookmarkActivity : DaggerLongPressFixActivity() {
++@AndroidEntryPoint
++class BookmarkActivity : LongPressFixActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+diff --git a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/view/BookmarkFragment.kt b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/view/BookmarkFragment.kt
+index 03fcdc06..9fae21b2 100644
+--- a/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/view/BookmarkFragment.kt
++++ b/module/bookmark/src/main/java/jp/hazuki/yuzubrowser/bookmark/view/BookmarkFragment.kt
+@@ -26,10 +26,11 @@ import android.widget.Toast
+ import androidx.appcompat.app.AppCompatActivity
+ import androidx.appcompat.view.ActionMode
+ import androidx.appcompat.widget.PopupMenu
++import androidx.fragment.app.Fragment
+ import androidx.recyclerview.widget.ItemTouchHelper
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
+-import dagger.android.support.DaggerFragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.bookmark.R
+ import jp.hazuki.bookmark.databinding.FragmentBookmarkBinding
+ import jp.hazuki.yuzubrowser.bookmark.item.BookmarkFolder
+@@ -55,7 +56,8 @@ import jp.hazuki.yuzubrowser.ui.widget.recycler.RecyclerTouchLocationDetector
+ import java.util.*
+ import javax.inject.Inject
+ 
+-class BookmarkFragment : DaggerFragment(), BookmarkItemAdapter.OnBookmarkRecyclerListener, ActionMode.Callback, BreadcrumbsView.OnBreadcrumbsViewClickListener {
++@AndroidEntryPoint
++class BookmarkFragment : Fragment(), BookmarkItemAdapter.OnBookmarkRecyclerListener, ActionMode.Callback, BreadcrumbsView.OnBreadcrumbsViewClickListener {
+ 
+     private var pickMode: Boolean = false
+ 
+diff --git a/module/download/build.gradle b/module/download/build.gradle
+index 4aed19a8..17521b61 100644
+--- a/module/download/build.gradle
++++ b/module/download/build.gradle
+@@ -18,6 +18,7 @@ apply plugin: 'com.android.library'
+ apply plugin: 'kotlin-android'
+ apply plugin: 'kotlin-parcelize'
+ apply plugin: 'kotlin-kapt'
++apply plugin: 'dagger.hilt.android.plugin'
+ 
+ android {
+     compileSdkVersion Build.compile_sdk_version
+@@ -79,13 +80,8 @@ dependencies {
+     implementation Libs.okhttp
+     implementation Libs.header_decor
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    kaptTest Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
++    implementation Dagger.hilt
++    kapt Dagger.hiltCompiler
+ 
+     implementation AndroidX.room
+     implementation AndroidX.roomKtx
+diff --git a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadAndroidModule.kt b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadAndroidModule.kt
+deleted file mode 100644
+index 368ad6c7..00000000
+--- a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadAndroidModule.kt
++++ /dev/null
+@@ -1,40 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.download
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.download.service.DownloadService
+-import jp.hazuki.yuzubrowser.download.ui.DownloadListActivity
+-import jp.hazuki.yuzubrowser.download.ui.FastDownloadActivity
+-import jp.hazuki.yuzubrowser.download.ui.fragment.DownloadListFragment
+-
+-@Module
+-abstract class DownloadAndroidModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeDownloadService(): DownloadService
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeFastDownloadActivity(): FastDownloadActivity
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeDownloadListActivity(): DownloadListActivity
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeDownloadListFragment(): DownloadListFragment
+-}
+diff --git a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadDialogModule.kt b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadDialogModule.kt
+deleted file mode 100644
+index 0f54f2f1..00000000
+--- a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadDialogModule.kt
++++ /dev/null
+@@ -1,28 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.download
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.download.ui.fragment.DownloadDialog
+-
+-@Module
+-abstract class DownloadDialogModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeDownloadDialogFragment(): DownloadDialog
+-}
+\ No newline at end of file
+diff --git a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadModule.kt b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadModule.kt
+index 03154768..c096a96d 100644
+--- a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadModule.kt
++++ b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/DownloadModule.kt
+@@ -19,22 +19,20 @@ package jp.hazuki.yuzubrowser.download
+ import android.content.Context
+ import dagger.Module
+ import dagger.Provides
++import dagger.hilt.InstallIn
++import dagger.hilt.android.qualifiers.ApplicationContext
++import dagger.hilt.components.SingletonComponent
+ import jp.hazuki.yuzubrowser.download.repository.DownloadsDao
+ import jp.hazuki.yuzubrowser.download.repository.DownloadsDatabase
+ import javax.inject.Singleton
+ 
+ @Module
+-object DownloadModule {
++@InstallIn(SingletonComponent::class)
++class DownloadModule {
+ 
+     @Singleton
+     @Provides
+-    fun provideDownloadsDatabase(context: Context): DownloadsDatabase {
+-        return DownloadsDatabase.createInstance(context)
+-    }
+-
+-    @Singleton
+-    @Provides
+-    fun provideDownloadsDao(context: Context): DownloadsDao {
++    fun provideDownloadsDao(@ApplicationContext context: Context): DownloadsDao {
+         return DownloadsDatabase.createInstance(context).downloadsDao()
+     }
+ }
+diff --git a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/service/DownloadService.kt b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/service/DownloadService.kt
+index f71f0f63..fed3b487 100644
+--- a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/service/DownloadService.kt
++++ b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/service/DownloadService.kt
+@@ -19,6 +19,7 @@ package jp.hazuki.yuzubrowser.download.service
+ import android.annotation.SuppressLint
+ import android.app.NotificationManager
+ import android.app.PendingIntent
++import android.app.Service
+ import android.content.*
+ import android.net.Uri
+ import android.os.*
+@@ -26,7 +27,7 @@ import android.provider.MediaStore
+ import androidx.annotation.StringRes
+ import androidx.core.app.NotificationCompat
+ import androidx.documentfile.provider.DocumentFile
+-import dagger.android.DaggerService
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.core.utility.extensions.resolvePath
+ import jp.hazuki.yuzubrowser.core.utility.log.ErrorReport
+ import jp.hazuki.yuzubrowser.core.utility.log.Logger
+@@ -53,7 +54,8 @@ import kotlinx.coroutines.launch
+ import okhttp3.OkHttpClient
+ import javax.inject.Inject
+ 
+-class DownloadService : DaggerService(), ServiceClient.ServiceClientListener {
++@AndroidEntryPoint
++class DownloadService : Service(), ServiceClient.ServiceClientListener {
+ 
+     private lateinit var handler: Handler
+     private lateinit var powerManager: PowerManager
+diff --git a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/DownloadListActivity.kt b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/DownloadListActivity.kt
+index 0ef660f3..e71b63f4 100644
+--- a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/DownloadListActivity.kt
++++ b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/DownloadListActivity.kt
+@@ -20,6 +20,7 @@ import android.os.Build
+ import android.os.Bundle
+ import android.view.WindowInsets
+ import android.view.WindowManager
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.download.R
+ import jp.hazuki.yuzubrowser.download.core.data.DownloadFileInfo
+ import jp.hazuki.yuzubrowser.download.service.connection.ActivityClient
+@@ -27,10 +28,11 @@ import jp.hazuki.yuzubrowser.download.service.connection.ServiceSocket
+ import jp.hazuki.yuzubrowser.download.ui.fragment.DownloadListFragment
+ import jp.hazuki.yuzubrowser.ui.INTENT_EXTRA_MODE_FULLSCREEN
+ import jp.hazuki.yuzubrowser.ui.INTENT_EXTRA_MODE_ORIENTATION
+-import jp.hazuki.yuzubrowser.ui.app.DaggerThemeActivity
++import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ import jp.hazuki.yuzubrowser.ui.settings.AppPrefs
+ 
+-class DownloadListActivity : DaggerThemeActivity(), ActivityClient.ActivityClientListener, DownloadCommandController {
++@AndroidEntryPoint
++class DownloadListActivity : ThemeActivity(), ActivityClient.ActivityClientListener, DownloadCommandController {
+ 
+     private lateinit var downloadService: ServiceSocket
+ 
+diff --git a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/FastDownloadActivity.kt b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/FastDownloadActivity.kt
+index b4231341..63ec9b87 100644
+--- a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/FastDownloadActivity.kt
++++ b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/FastDownloadActivity.kt
+@@ -24,6 +24,7 @@ import android.net.Uri
+ import android.os.Bundle
+ import android.provider.MediaStore
+ import android.widget.Toast
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.asyncpermissions.AsyncPermissions
+ import jp.hazuki.asyncpermissions.PermissionResult
+ import jp.hazuki.yuzubrowser.core.MIME_TYPE_UNKNOWN
+@@ -38,7 +39,7 @@ import jp.hazuki.yuzubrowser.download.core.data.DownloadRequest
+ import jp.hazuki.yuzubrowser.download.core.data.MetaData
+ import jp.hazuki.yuzubrowser.download.core.downloader.Downloader
+ import jp.hazuki.yuzubrowser.download.getDownloadDocumentFile
+-import jp.hazuki.yuzubrowser.ui.app.DaggerThemeActivity
++import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ import jp.hazuki.yuzubrowser.ui.dialog.ProgressDialog
+ import jp.hazuki.yuzubrowser.ui.utils.checkStoragePermission
+ import jp.hazuki.yuzubrowser.ui.utils.openRequestPermissionSettings
+@@ -47,7 +48,8 @@ import kotlinx.coroutines.withContext
+ import okhttp3.OkHttpClient
+ import javax.inject.Inject
+ 
+-class FastDownloadActivity : DaggerThemeActivity() {
++@AndroidEntryPoint
++class FastDownloadActivity : ThemeActivity() {
+ 
+     @Inject
+     lateinit var okHttpClient: OkHttpClient
+diff --git a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/fragment/DownloadDialog.kt b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/fragment/DownloadDialog.kt
+index 36588227..c1e55188 100644
+--- a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/fragment/DownloadDialog.kt
++++ b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/fragment/DownloadDialog.kt
+@@ -28,7 +28,8 @@ import android.widget.EditText
+ import android.widget.Toast
+ import androidx.appcompat.app.AlertDialog
+ import androidx.documentfile.provider.DocumentFile
+-import dagger.android.support.DaggerAppCompatDialogFragment
++import androidx.fragment.app.DialogFragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.core.MIME_TYPE_UNKNOWN
+ import jp.hazuki.yuzubrowser.core.utility.storage.toDocumentFile
+ import jp.hazuki.yuzubrowser.core.utility.utils.createUniqueFileName
+@@ -41,7 +42,8 @@ import kotlinx.coroutines.withContext
+ import okhttp3.OkHttpClient
+ import javax.inject.Inject
+ 
+-class DownloadDialog : DaggerAppCompatDialogFragment() {
++@AndroidEntryPoint
++class DownloadDialog : DialogFragment() {
+ 
+     private lateinit var root: DocumentFile
+     private lateinit var folderButton: Button
+diff --git a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/fragment/DownloadListFragment.kt b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/fragment/DownloadListFragment.kt
+index 1ae21bcf..d3806045 100644
+--- a/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/fragment/DownloadListFragment.kt
++++ b/module/download/src/main/java/jp/hazuki/yuzubrowser/download/ui/fragment/DownloadListFragment.kt
+@@ -26,10 +26,11 @@ import android.view.*
+ import androidx.appcompat.app.AppCompatActivity
+ import androidx.appcompat.view.ActionMode
+ import androidx.documentfile.provider.DocumentFile
++import androidx.fragment.app.Fragment
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
+ import ca.barrenechea.widget.recyclerview.decoration.StickyHeaderDecoration
+-import dagger.android.support.DaggerFragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.core.utility.extensions.resolvePath
+ import jp.hazuki.yuzubrowser.core.utility.storage.toDocumentFile
+ import jp.hazuki.yuzubrowser.download.R
+@@ -53,7 +54,8 @@ import kotlinx.coroutines.GlobalScope
+ import kotlinx.coroutines.launch
+ import javax.inject.Inject
+ 
+-class DownloadListFragment : DaggerFragment(), ActivityClient.ActivityClientListener, OnRecyclerMenuListener, ActionMode.Callback {
++@AndroidEntryPoint
++class DownloadListFragment : Fragment(), ActivityClient.ActivityClientListener, OnRecyclerMenuListener, ActionMode.Callback {
+ 
+     private var commandController: DownloadCommandController? = null
+     private lateinit var adapter: DownloadListAdapter
+diff --git a/module/favicon/build.gradle b/module/favicon/build.gradle
+index ba7ae98f..d2a029ed 100644
+--- a/module/favicon/build.gradle
++++ b/module/favicon/build.gradle
+@@ -51,12 +51,5 @@ dependencies {
+     implementation Libs.kotlin_coroutines
+     implementation Libs.kotlin_coroutines_android
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
+-
+     implementation project(':module:core')
+ }
+diff --git a/module/history/build.gradle b/module/history/build.gradle
+index 829156e6..a19e21ef 100644
+--- a/module/history/build.gradle
++++ b/module/history/build.gradle
+@@ -17,6 +17,7 @@
+ apply plugin: 'com.android.library'
+ apply plugin: 'kotlin-android'
+ apply plugin: 'kotlin-kapt'
++apply plugin: 'dagger.hilt.android.plugin'
+ 
+ android {
+     compileSdkVersion Build.compile_sdk_version
+@@ -78,13 +79,6 @@ dependencies {
+     implementation AndroidX.KTX
+     implementation AndroidX.fragmentKtx
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
+-
+     implementation Libs.okio
+     implementation Libs.moshi
+     kapt Libs.moshiCodeGen
+@@ -100,13 +94,8 @@ dependencies {
+     implementation Libs.kotlin_coroutines
+     implementation Libs.kotlin_coroutines_android
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    kaptTest Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
++    implementation Dagger.hilt
++    kapt Dagger.hiltCompiler
+ 
+     implementation Libs.header_decor
+     implementation 'com.github.turing-tech:MaterialScrollBar:13.3.4'
+diff --git a/module/history/src/main/java/jp/hazuki/yuzubrowser/history/di/HistoryModule.kt b/module/history/src/main/java/jp/hazuki/yuzubrowser/history/di/HistoryModule.kt
+deleted file mode 100644
+index f266e1c2..00000000
+--- a/module/history/src/main/java/jp/hazuki/yuzubrowser/history/di/HistoryModule.kt
++++ /dev/null
+@@ -1,32 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.history.di
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.history.presenter.BrowserHistoryActivity
+-import jp.hazuki.yuzubrowser.history.presenter.BrowserHistoryFragment
+-
+-@Module
+-abstract class HistoryModule {
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeBrowserHistoryActivity(): BrowserHistoryActivity
+-
+-    @ContributesAndroidInjector
+-    abstract fun contributeBrowserHistoryFragment(): BrowserHistoryFragment
+-}
+diff --git a/module/history/src/main/java/jp/hazuki/yuzubrowser/history/presenter/BrowserHistoryActivity.kt b/module/history/src/main/java/jp/hazuki/yuzubrowser/history/presenter/BrowserHistoryActivity.kt
+index e4a261df..50409bfd 100644
+--- a/module/history/src/main/java/jp/hazuki/yuzubrowser/history/presenter/BrowserHistoryActivity.kt
++++ b/module/history/src/main/java/jp/hazuki/yuzubrowser/history/presenter/BrowserHistoryActivity.kt
+@@ -22,14 +22,16 @@ import android.os.Bundle
+ import android.view.MenuItem
+ import android.view.WindowInsets
+ import android.view.WindowManager
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.core.utility.extensions.convertDpToFloatPx
+ import jp.hazuki.yuzubrowser.historyModel.R
+ import jp.hazuki.yuzubrowser.ui.INTENT_EXTRA_MODE_FULLSCREEN
+ import jp.hazuki.yuzubrowser.ui.INTENT_EXTRA_MODE_ORIENTATION
+-import jp.hazuki.yuzubrowser.ui.app.DaggerThemeActivity
++import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ import jp.hazuki.yuzubrowser.ui.settings.AppPrefs
+ 
+-class BrowserHistoryActivity : DaggerThemeActivity() {
++@AndroidEntryPoint
++class BrowserHistoryActivity : ThemeActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+         super.onCreate(savedInstanceState)
+diff --git a/module/history/src/main/java/jp/hazuki/yuzubrowser/history/presenter/BrowserHistoryFragment.kt b/module/history/src/main/java/jp/hazuki/yuzubrowser/history/presenter/BrowserHistoryFragment.kt
+index a808ae4c..f5678fc4 100644
+--- a/module/history/src/main/java/jp/hazuki/yuzubrowser/history/presenter/BrowserHistoryFragment.kt
++++ b/module/history/src/main/java/jp/hazuki/yuzubrowser/history/presenter/BrowserHistoryFragment.kt
+@@ -26,11 +26,12 @@ import androidx.appcompat.app.AppCompatActivity
+ import androidx.appcompat.view.ActionMode
+ import androidx.appcompat.widget.PopupMenu
+ import androidx.appcompat.widget.SearchView
++import androidx.fragment.app.Fragment
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
+ import ca.barrenechea.widget.recyclerview.decoration.StickyHeaderDecoration
+ import com.turingtechnologies.materialscrollbar.TouchScrollBar
+-import dagger.android.support.DaggerFragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.bookmark.view.showAddBookmarkDialog
+ import jp.hazuki.yuzubrowser.browser.connecter.openable.OpenUrl
+ import jp.hazuki.yuzubrowser.browser.connecter.openable.OpenUrlList
+@@ -49,8 +50,8 @@ import jp.hazuki.yuzubrowser.ui.widget.recycler.RecyclerTouchLocationDetector
+ import java.util.*
+ import javax.inject.Inject
+ 
+-
+-class BrowserHistoryFragment : DaggerFragment(), BrowserHistoryAdapter.OnHistoryRecyclerListener, ActionMode.Callback {
++@AndroidEntryPoint
++class BrowserHistoryFragment : Fragment(), BrowserHistoryAdapter.OnHistoryRecyclerListener, ActionMode.Callback {
+ 
+     private var pickMode: Boolean = false
+     private lateinit var adapter: BrowserHistoryAdapter
+diff --git a/module/search/build.gradle b/module/search/build.gradle
+index f40eba70..eea37b1a 100644
+--- a/module/search/build.gradle
++++ b/module/search/build.gradle
+@@ -17,6 +17,7 @@
+ apply plugin: 'com.android.library'
+ apply plugin: 'kotlin-android'
+ apply plugin: 'kotlin-kapt'
++apply plugin: 'dagger.hilt.android.plugin'
+ 
+ android {
+     compileSdkVersion Build.compile_sdk_version
+@@ -81,13 +82,6 @@ dependencies {implementation fileTree(dir: 'libs', include: ['*.jar'])
+     implementation AndroidX.fragmentKtx
+     implementation AndroidX.lifecycle
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
+-
+     implementation Libs.okio
+     implementation Libs.moshi
+     kapt Libs.moshiCodeGen
+@@ -105,11 +99,6 @@ dependencies {implementation fileTree(dir: 'libs', include: ['*.jar'])
+     implementation Libs.kotlin_coroutines
+     implementation Libs.kotlin_coroutines_android
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    kaptTest Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
++    implementation Dagger.hilt
++    kapt Dagger.hiltCompiler
+ }
+diff --git a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/di/SearchModule.kt b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/di/SearchModule.kt
+deleted file mode 100644
+index c6dffe9d..00000000
+--- a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/di/SearchModule.kt
++++ /dev/null
+@@ -1,36 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.search.di
+-
+-import dagger.Module
+-import dagger.android.ContributesAndroidInjector
+-import jp.hazuki.yuzubrowser.search.presentation.search.SearchActivity
+-import jp.hazuki.yuzubrowser.search.presentation.settings.SearchUrlListFragment
+-import jp.hazuki.yuzubrowser.search.presentation.settings.SearchUrlPreference
+-
+-@Module
+-abstract class SearchModule {
+-
+-    @ContributesAndroidInjector(modules = [SearchSubModule::class])
+-    abstract fun contributeSearchActivity(): SearchActivity
+-
+-    @ContributesAndroidInjector(modules = [SearchSubModule::class])
+-    abstract fun contributeSearchUrlListFragment(): SearchUrlListFragment
+-
+-    @ContributesAndroidInjector(modules = [SearchSubModule::class])
+-    abstract fun contributeSearchUrlPreferenceDialog(): SearchUrlPreference.PreferenceDialog
+-}
+diff --git a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/di/SearchSubModule.kt b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/di/SearchSubModule.kt
+index 0da0c7ca..bb938593 100644
+--- a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/di/SearchSubModule.kt
++++ b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/di/SearchSubModule.kt
+@@ -21,36 +21,43 @@ import android.content.Context
+ import com.squareup.moshi.Moshi
+ import dagger.Module
+ import dagger.Provides
++import dagger.hilt.InstallIn
++import dagger.hilt.android.components.ActivityRetainedComponent
++import dagger.hilt.android.qualifiers.ApplicationContext
+ import jp.hazuki.yuzubrowser.bookmark.repository.BookmarkManager
+ import jp.hazuki.yuzubrowser.history.repository.BrowserHistoryManager
+ import jp.hazuki.yuzubrowser.search.domain.ISearchUrlRepository
+ import jp.hazuki.yuzubrowser.search.domain.ISuggestRepository
+ import jp.hazuki.yuzubrowser.search.domain.usecase.SearchSettingsViewUseCase
+ import jp.hazuki.yuzubrowser.search.domain.usecase.SearchViewUseCase
+-import jp.hazuki.yuzubrowser.search.presentation.search.SearchViewModel
+ import jp.hazuki.yuzubrowser.search.presentation.settings.SearchSettingsViewModel
+ import jp.hazuki.yuzubrowser.search.repository.SearchUrlManager
+ import jp.hazuki.yuzubrowser.search.repository.SuggestRepository
+ import jp.hazuki.yuzubrowser.ui.provider.ISuggestProvider
+ 
+ @Module
+-object SearchSubModule {
++@InstallIn(ActivityRetainedComponent::class)
++class SearchSubModule {
+ 
+     @Provides
+-    @JvmStatic
+     fun provideSuggestRepository(application: Application, suggestProvider: ISuggestProvider): ISuggestRepository {
+         return SuggestRepository(application, suggestProvider)
+     }
+ 
+     @Provides
+-    @JvmStatic
+-    fun provideSearchUrlRepository(context: Context, moshi: Moshi): ISearchUrlRepository {
++    fun provideSearchUrlRepository(
++        @ApplicationContext context: Context,
++        moshi: Moshi
++    ): ISearchUrlRepository {
+         return SearchUrlManager(context, moshi)
+     }
+ 
+     @Provides
+-    @JvmStatic
+-    internal fun provideSearchViewUseCase(context: Context, suggestRepository: ISuggestRepository, searchUrlRepository: ISearchUrlRepository): SearchViewUseCase {
++    internal fun provideSearchViewUseCase(
++        @ApplicationContext context: Context,
++        suggestRepository: ISuggestRepository,
++        searchUrlRepository: ISearchUrlRepository,
++    ): SearchViewUseCase {
+         return SearchViewUseCase(
+             BookmarkManager.getInstance(context),
+             BrowserHistoryManager.getInstance(context),
+@@ -60,20 +67,17 @@ object SearchSubModule {
+     }
+ 
+     @Provides
+-    @JvmStatic
+-    internal fun provideSearchViewModelFactory(application: Application, useCase: SearchViewUseCase): SearchViewModel.Factory {
+-        return SearchViewModel.Factory(application, useCase)
+-    }
+-
+-    @Provides
+-    @JvmStatic
+-    internal fun provideSearchSettingsViewUseCase(searchUrlRepository: ISearchUrlRepository): SearchSettingsViewUseCase {
++    internal fun provideSearchSettingsViewUseCase(
++        searchUrlRepository: ISearchUrlRepository
++    ): SearchSettingsViewUseCase {
+         return SearchSettingsViewUseCase(searchUrlRepository)
+     }
+ 
+     @Provides
+-    @JvmStatic
+-    internal fun provideSearchSettingsViewModelFactory(application: Application, useCase: SearchSettingsViewUseCase): SearchSettingsViewModel.Factory {
++    internal fun provideSearchSettingsViewModelFactory(
++        application: Application,
++        useCase: SearchSettingsViewUseCase,
++    ): SearchSettingsViewModel.Factory {
+         return SearchSettingsViewModel.Factory(application, useCase)
+     }
+ }
+diff --git a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/search/SearchActivity.kt b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/search/SearchActivity.kt
+index e536b705..a18a0c1f 100644
+--- a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/search/SearchActivity.kt
++++ b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/search/SearchActivity.kt
+@@ -26,6 +26,7 @@ import androidx.activity.viewModels
+ import androidx.databinding.DataBindingUtil
+ import androidx.databinding.Observable
+ import androidx.recyclerview.widget.LinearLayoutManager
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.core.utility.extensions.clipboardText
+ import jp.hazuki.yuzubrowser.favicon.FaviconManager
+ import jp.hazuki.yuzubrowser.search.R
+@@ -33,21 +34,20 @@ import jp.hazuki.yuzubrowser.search.databinding.SearchActivityBinding
+ import jp.hazuki.yuzubrowser.search.databinding.SearchSeachBarBinding
+ import jp.hazuki.yuzubrowser.search.presentation.widget.SearchButton
+ import jp.hazuki.yuzubrowser.ui.INTENT_EXTRA_MODE_FULLSCREEN
+-import jp.hazuki.yuzubrowser.ui.app.DaggerThemeActivity
++import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ import jp.hazuki.yuzubrowser.ui.settings.AppPrefs
+ import jp.hazuki.yuzubrowser.ui.theme.ThemeData
+ import javax.inject.Inject
+ import kotlin.math.max
+ import kotlin.math.min
+ 
+-class SearchActivity : DaggerThemeActivity(), SearchButton.Callback, SearchSuggestAdapter.OnSearchSelectedListener, SuggestDeleteDialog.OnDeleteQuery {
++@AndroidEntryPoint
++class SearchActivity : ThemeActivity(), SearchButton.Callback, SearchSuggestAdapter.OnSearchSelectedListener, SuggestDeleteDialog.OnDeleteQuery {
+ 
+-    @Inject
+-    internal lateinit var factory: SearchViewModel.Factory
+     @Inject
+     internal lateinit var faviconManager: FaviconManager
+ 
+-    private val viewModel by viewModels<SearchViewModel>(factoryProducer = { factory })
++    private val viewModel by viewModels<SearchViewModel>()
+     private lateinit var binding: SearchActivityBinding
+     private lateinit var barBinding: SearchSeachBarBinding
+ 
+diff --git a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/search/SearchViewModel.kt b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/search/SearchViewModel.kt
+index adb4b870..5ebd7f46 100644
+--- a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/search/SearchViewModel.kt
++++ b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/search/SearchViewModel.kt
+@@ -22,6 +22,7 @@ import androidx.lifecycle.AndroidViewModel
+ import androidx.lifecycle.MutableLiveData
+ import androidx.lifecycle.ViewModel
+ import androidx.lifecycle.ViewModelProvider
++import dagger.hilt.android.lifecycle.HiltViewModel
+ import jp.hazuki.yuzubrowser.core.utility.utils.ui
+ import jp.hazuki.yuzubrowser.search.domain.usecase.SearchViewUseCase
+ import jp.hazuki.yuzubrowser.search.model.SearchSuggestModel
+@@ -31,8 +32,10 @@ import jp.hazuki.yuzubrowser.ui.settings.AppPrefs
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
+ import kotlinx.coroutines.async
++import javax.inject.Inject
+ 
+-internal class SearchViewModel(
++@HiltViewModel
++internal class SearchViewModel @Inject constructor(
+     application: Application,
+     private val useCase: SearchViewUseCase
+ ) : AndroidViewModel(application) {
+diff --git a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlListActivity.kt b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlListActivity.kt
+index 1dbad931..877f61c4 100644
+--- a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlListActivity.kt
++++ b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlListActivity.kt
+@@ -19,9 +19,11 @@ package jp.hazuki.yuzubrowser.search.presentation.settings
+ import android.os.Bundle
+ import android.view.MenuItem
+ import androidx.fragment.app.commit
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.search.R
+ import jp.hazuki.yuzubrowser.ui.app.ThemeActivity
+ 
++@AndroidEntryPoint
+ class SearchUrlListActivity : ThemeActivity() {
+ 
+     override fun onCreate(savedInstanceState: Bundle?) {
+diff --git a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlListFragment.kt b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlListFragment.kt
+index 03e03e35..54994e0c 100644
+--- a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlListFragment.kt
++++ b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlListFragment.kt
+@@ -20,11 +20,12 @@ import android.os.Bundle
+ import android.view.LayoutInflater
+ import android.view.View
+ import android.view.ViewGroup
++import androidx.fragment.app.Fragment
+ import androidx.fragment.app.viewModels
+ import androidx.recyclerview.widget.ItemTouchHelper
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import com.google.android.material.snackbar.Snackbar
+-import dagger.android.support.DaggerFragment
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.favicon.FaviconManager
+ import jp.hazuki.yuzubrowser.search.R
+ import jp.hazuki.yuzubrowser.search.databinding.SearchSettingsFragmentBinding
+@@ -33,13 +34,15 @@ import jp.hazuki.yuzubrowser.ui.dialog.DeleteDialogCompat
+ import jp.hazuki.yuzubrowser.ui.widget.recycler.RecyclerMenu
+ import javax.inject.Inject
+ 
+-class SearchUrlListFragment : DaggerFragment(), SearchSettingDialog.OnUrlEditedListener, RecyclerMenu.OnRecyclerMenuListener, DeleteDialogCompat.OnDelete, SearchUrlAdapter.OnSearchUrlClickListener {
++@AndroidEntryPoint
++class SearchUrlListFragment : Fragment(), SearchSettingDialog.OnUrlEditedListener, RecyclerMenu.OnRecyclerMenuListener, DeleteDialogCompat.OnDelete, SearchUrlAdapter.OnSearchUrlClickListener {
+ 
+     private lateinit var binding: SearchSettingsFragmentBinding
+     private val viewModel by viewModels<SearchSettingsViewModel>(factoryProducer = { factory })
+ 
+     @Inject
+     internal lateinit var factory: SearchSettingsViewModel.Factory
++
+     @Inject
+     internal lateinit var faviconManager: FaviconManager
+ 
+diff --git a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlPreference.kt b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlPreference.kt
+index 71fe0370..7c995b08 100644
+--- a/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlPreference.kt
++++ b/module/search/src/main/java/jp/hazuki/yuzubrowser/search/presentation/settings/SearchUrlPreference.kt
+@@ -29,7 +29,7 @@ import androidx.preference.Preference
+ import androidx.recyclerview.widget.LinearLayoutManager
+ import androidx.recyclerview.widget.RecyclerView
+ import com.squareup.moshi.Moshi
+-import dagger.android.support.AndroidSupportInjection
++import dagger.hilt.android.AndroidEntryPoint
+ import jp.hazuki.yuzubrowser.favicon.FaviconManager
+ import jp.hazuki.yuzubrowser.search.R
+ import jp.hazuki.yuzubrowser.search.domain.ISearchUrlRepository
+@@ -46,12 +46,15 @@ class SearchUrlPreference(context: Context, attrs: AttributeSet) : DialogPrefere
+         setNegativeButtonText(android.R.string.cancel)
+     }
+ 
++    @AndroidEntryPoint
+     class PreferenceDialog : YuzuPreferenceDialog(), OnRecyclerListener {
+ 
+         @Inject
+         lateinit var manager: ISearchUrlRepository
++
+         @Inject
+         lateinit var moshi: Moshi
++
+         @Inject
+         internal lateinit var faviconManager: FaviconManager
+ 
+@@ -66,7 +69,6 @@ class SearchUrlPreference(context: Context, attrs: AttributeSet) : DialogPrefere
+ 
+         override fun onCreateDialogView(context: Context?): View {
+             val activity = activity ?: throw IllegalStateException()
+-            AndroidSupportInjection.inject(this)
+ 
+             provider = SearchSuggestProviders(manager.load())
+ 
+diff --git a/module/ui/build.gradle b/module/ui/build.gradle
+index 75e9de84..c66a781d 100644
+--- a/module/ui/build.gradle
++++ b/module/ui/build.gradle
+@@ -69,13 +69,6 @@ dependencies {
+     implementation AndroidX.KTX
+     implementation AndroidX.lifecycle
+ 
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
+-
+     implementation Libs.okhttp
+     implementation Libs.okio
+     implementation Libs.moshi
+diff --git a/module/ui/src/main/java/jp/hazuki/yuzubrowser/ui/app/DaggerLongPressFixActivity.kt b/module/ui/src/main/java/jp/hazuki/yuzubrowser/ui/app/DaggerLongPressFixActivity.kt
+deleted file mode 100644
+index 0266973d..00000000
+--- a/module/ui/src/main/java/jp/hazuki/yuzubrowser/ui/app/DaggerLongPressFixActivity.kt
++++ /dev/null
+@@ -1,42 +0,0 @@
+-/*
+- * Copyright (C) 2017-2020 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.ui.app
+-
+-import android.annotation.SuppressLint
+-import android.os.Bundle
+-import dagger.android.AndroidInjection
+-import dagger.android.AndroidInjector
+-import dagger.android.DispatchingAndroidInjector
+-import dagger.android.HasAndroidInjector
+-import javax.inject.Inject
+-
+-@Suppress("DEPRECATION")
+-@SuppressLint("Registered")
+-open class DaggerLongPressFixActivity : LongPressFixActivity(), HasAndroidInjector {
+-
+-    @Inject
+-    internal lateinit var androidInjector: DispatchingAndroidInjector<Any>
+-
+-    override fun onCreate(savedInstanceState: Bundle?) {
+-        AndroidInjection.inject(this)
+-        super.onCreate(savedInstanceState)
+-    }
+-
+-    override fun androidInjector(): AndroidInjector<Any> {
+-        return androidInjector
+-    }
+-}
+diff --git a/module/ui/src/main/java/jp/hazuki/yuzubrowser/ui/app/DaggerThemeActivity.kt b/module/ui/src/main/java/jp/hazuki/yuzubrowser/ui/app/DaggerThemeActivity.kt
+deleted file mode 100644
+index f5448bb0..00000000
+--- a/module/ui/src/main/java/jp/hazuki/yuzubrowser/ui/app/DaggerThemeActivity.kt
++++ /dev/null
+@@ -1,40 +0,0 @@
+-/*
+- * Copyright (C) 2017-2020 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.ui.app
+-
+-import android.os.Bundle
+-import dagger.android.AndroidInjection
+-import dagger.android.AndroidInjector
+-import dagger.android.DispatchingAndroidInjector
+-import dagger.android.HasAndroidInjector
+-import javax.inject.Inject
+-
+-@Suppress("DEPRECATION")
+-open class DaggerThemeActivity : ThemeActivity(), HasAndroidInjector {
+-
+-    @Inject
+-    internal lateinit var androidInjector: DispatchingAndroidInjector<Any>
+-
+-    override fun onCreate(savedInstanceState: Bundle?) {
+-        AndroidInjection.inject(this)
+-        super.onCreate(savedInstanceState)
+-    }
+-
+-    override fun androidInjector(): AndroidInjector<Any> {
+-        return androidInjector
+-    }
+-}
+diff --git a/module/ui/src/main/java/jp/hazuki/yuzubrowser/ui/di/ViewModelScope.kt b/module/ui/src/main/java/jp/hazuki/yuzubrowser/ui/di/ViewModelScope.kt
+deleted file mode 100644
+index 50e43c21..00000000
+--- a/module/ui/src/main/java/jp/hazuki/yuzubrowser/ui/di/ViewModelScope.kt
++++ /dev/null
+@@ -1,23 +0,0 @@
+-/*
+- * Copyright (C) 2017-2019 Hazuki
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *     http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package jp.hazuki.yuzubrowser.ui.di
+-
+-import javax.inject.Scope
+-
+-@Scope
+-@Retention
+-annotation class ViewModelScope
+\ No newline at end of file
+diff --git a/module/webview/build.gradle b/module/webview/build.gradle
+index a3a0bc69..45132666 100644
+--- a/module/webview/build.gradle
++++ b/module/webview/build.gradle
+@@ -59,12 +59,4 @@ dependencies {
+     implementation Libs.moshi
+     kapt Libs.moshiCodeGen
+     kaptTest Libs.moshiCodeGen
+-
+-    implementation Libs.dagger2
+-    annotationProcessor Libs.dagger2_compiler
+-    kapt Libs.dagger2_compiler
+-    kaptTest Libs.dagger2_compiler
+-    implementation Libs.dagger_android
+-    implementation Libs.dagger_android_support
+-    kapt Libs.dagger_android_processor
+ }

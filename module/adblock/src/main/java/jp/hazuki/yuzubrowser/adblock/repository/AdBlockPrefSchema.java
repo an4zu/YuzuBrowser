@@ -16,8 +16,8 @@
 
 package jp.hazuki.yuzubrowser.adblock.repository;
 
-import com.rejasupotaro.android.kvs.annotations.Key;
-import com.rejasupotaro.android.kvs.annotations.Table;
+import jp.hazuki.yuzubrowser.adblock.kvs.Key;
+import jp.hazuki.yuzubrowser.adblock.kvs.Table;
 
 @Table(name = "abp")
 public class AdBlockPrefSchema {
